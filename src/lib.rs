@@ -73,6 +73,11 @@ impl Contract {
         submit_by: u64,
         finalize_by: u64,
     ) -> u64 {
+        require!(!title.trim().is_empty(), "title is required");
+        require!(title.len() <= 100, "title too long");
+        if let Some(hash) = &code_hash {
+            require!(hash.0.len() == 32, "code hash must be 32 bytes");
+        }
         require!(
             env::block_timestamp() < register_by && register_by <= submit_by && submit_by < finalize_by,
             "bad timeline: now < register_by <= submit_by < finalize_by"
@@ -269,16 +274,30 @@ impl Contract {
 /// split if all stakes are 0). The first winner gets the remainder, so nothing
 /// is left behind.
 pub fn split_pot(total: u128, stakes: &[u128]) -> Vec<u128> {
-    let sum: u128 = stakes.iter().sum();
-    let n = stakes.len() as u128;
+    if stakes.is_empty() {
+        return vec![];
+    }
+
+    // Sum in U256: up to 100 individually valid u128 stakes can overflow u128.
+    let sum = stakes
+        .iter()
+        .fold(U256::zero(), |acc, stake| acc + U256::from(*stake));
+    let count = U256::from(stakes.len() as u128);
+
     let mut out: Vec<u128> = stakes
         .iter()
-        .map(|s| {
-            if sum == 0 { total / n } else { (U256::from(total) * U256::from(*s) / U256::from(sum)).as_u128() }
+        .map(|stake| {
+            if sum.is_zero() {
+                (U256::from(total) / count).as_u128()
+            } else {
+                (U256::from(total) * U256::from(*stake) / sum).as_u128()
+            }
         })
         .collect();
-    let others: u128 = out[1..].iter().sum();
-    out[0] = total - others;
+
+    // Assign rounding dust to the first winner so the payout is exact.
+    let paid_to_others: u128 = out.iter().skip(1).sum();
+    out[0] = total - paid_to_others;
     out
 }
 
@@ -314,6 +333,16 @@ mod tests {
         assert_eq!(out[1], 6 * N);
         assert_eq!(out[2], 12 * N);
         assert_eq!(split_pot(10, &[0, 0, 0]).iter().sum::<u128>(), 10);
+    }
+
+    #[test]
+    fn split_handles_empty_and_extreme_stakes() {
+        assert!(split_pot(100, &[]).is_empty());
+
+        let out = split_pot(u128::MAX, &[u128::MAX, u128::MAX, u128::MAX]);
+        assert_eq!(out.iter().try_fold(0u128, |sum, amount| sum.checked_add(*amount)), Some(u128::MAX));
+        assert_eq!(out[1], u128::MAX / 3);
+        assert_eq!(out[2], u128::MAX / 3);
     }
 
     #[test]
