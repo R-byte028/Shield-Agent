@@ -20,7 +20,7 @@ Tracks: Social Money, Real-World Money.
 ## Known limits (say these in the pitch)
 - Host knows the code, so in guest-pays events they could join with fake accounts. Best for trusted communities. Next step: per-guest QR codes or allowlists.
 - Guests can share the code with other registered guests.
-- A failed payout transfer is not retried.
+- Payouts are pull-based: recipients claim individually. Failed transfers return to Pending through a private callback and can be retried.
 - Not audited. Testnet only.
 
 ## MAINNET: read before deploying
@@ -43,7 +43,7 @@ Frontend: open `index.html` through a local server (`python3 -m http.server`), e
 2. Three guest accounts register with different stakes.
 3. Two guests enter the code; a third tries after the winners are full and is rejected.
 4. Host settles: pot splits by stake. Show the failed cheat attempts (host picking winners, settling early).
-5. Create a host-funded event with links, host picks winners.
+5. Create a host-funded event with links, host picks winners. Each recipient then claims their payout.
 
 ## Pitch
 Event no-shows waste hosts' money and time. Show-Up Pot makes commitment real: deposits are escrowed on-chain, the contract decides who earned the pot, and everyone is refunded if the host disappears. Next: pay in any asset from any chain with NEAR Intents, per-guest QR codes, reputation for hosts.
