@@ -433,6 +433,23 @@ mod tests {
     }
 
     #[test]
+    fn winner_can_claim_payout_and_it_enters_flight() {
+        let mut c = setup(0, 10 * N, Some(1));
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit_code(0, "secret".into());
+        ctx(accounts(0), 0, 7);
+        c.finalize(0, None);
+
+        ctx(accounts(1), 0, 8);
+        let _promise = c.claim_payout(0);
+        let event = c.get_event(0).unwrap();
+        assert_eq!(event.payouts[0].status, PayoutStatus::InFlight);
+        assert_eq!(get_created_receipts().len(), 2); // transfer + callback
+    }
+
+    #[test]
     fn guest_pays_settles_after_window() {
         let mut c = setup(N, 0, None);
         for (g, stake) in [(1, N), (2, 3 * N), (3, 6 * N)] { ctx(accounts(g), stake, 5); c.register(0); }
