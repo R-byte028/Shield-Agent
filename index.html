@@ -28,7 +28,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#080e16;border:1px so
 @media(max-width:520px){body{padding:22px 14px 40px}body>section{padding:17px;border-radius:14px}h1{font-size:32px}section button{min-height:48px}}
 </style></head><body>
 <h1>Show-Up Pot</h1>
-<small>On-chain event escrow · Built on NEAR<br>Deposit, show up, complete the challenge and share the pot. Prototype interface — do not use with real funds.</small>
+<small>On-chain event escrow · NEAR TESTNET ONLY<br>Prototype interface. Use testnet tokens only — never connect a mainnet contract or send real funds.</small>
 
 <section><h2>1. Connect</h2>
 <input id="cid" placeholder="Contract account (e.g. showup.yourname.near)">
@@ -71,7 +71,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#080e16;border:1px so
 <script src="https://cdn.jsdelivr.net/npm/near-api-js@2.1.4/dist/near-api-js.min.js"></script>
 <script>
 const $=id=>document.getElementById(id), log=m=>$('log').textContent=String(m);
-const cfg={networkId:'mainnet',nodeUrl:'https://rpc.mainnet.near.org',walletUrl:'https://app.mynearwallet.com',helperUrl:'https://helper.mainnet.near.org'};
+const cfg={networkId:'testnet',nodeUrl:'https://rpc.testnet.near.org',walletUrl:'https://testnet.mynearwallet.com',helperUrl:'https://helper.testnet.near.org'};
 let wallet,acct;
 $('cid').value=localStorage.getItem('cid')||'';
 const GAS='100000000000000', ns=min=>String((Date.now()+min*60000)*1e6);
