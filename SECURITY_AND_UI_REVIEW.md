@@ -1,32 +1,33 @@
-# PactChain / Show-Up Pot — Review Notes
+# PactChain — Security and Product-Scope Review
 
 ## Scope
-This is an initial source review of the Rust contract and the static HTML frontend. It is not a formal security audit and does not establish that the application is safe for real funds.
+This is an initial source review, not a formal security audit. The prototype is restricted to sponsor-funded rewards: participants register for free and do not deposit or stake funds.
 
-## Contract findings requiring fixes and regression tests
+## Product-safety boundary
+- Only the host/sponsor funds the prize pool.
+- Participant registration must attach zero NEAR.
+- The contract rejects nonzero `min_deposit` values and participant deposits.
+- Eligible rewards are split evenly; participants' deposits or stakes are never used to calculate rewards.
+- Cancellation, expiry, or a no-winner settlement returns the sponsor-funded amount through the normal claim flow.
 
-### 1. Code-challenge winner selection can be bypassed
-In `finalize`, the current guard rejects a caller-supplied winner list for guest-funded code events and for code events with a winner cap. A host-funded code event with no winner cap does not meet that guard. In that configuration, the host can pass an arbitrary list of registered accounts and bypass the code challenge.
+## Contract safeguards added on this branch
+- Code-challenge winners are derived only from successful on-chain submissions, regardless of winner cap.
+- Link-submission winners must have an on-chain proof-link record. This does not establish proof quality; the host still reviews submissions.
+- Regression tests cover host-selected code-winner rejection, proof-submission eligibility, free registration, rejection of participant-funded modes, and even sponsor-pool distribution.
+- Payouts remain pull-based: only the named recipient can claim a Pending payout; the status changes to InFlight before the transfer is initiated; the private callback marks success as Paid or restores failure to Pending.
 
-**Required fix:** For every `Challenge::Code` event, require `winners == None` and derive winners exclusively from `completed`, regardless of funding mode or winner cap.
+## Remaining verification
+- Add explicit callback tests for successful transfer => Paid and failed transfer => Pending.
+- Add explicit tests for non-recipient claims and duplicate claims while InFlight.
+- Verify refund and settlement transitions cannot create duplicate sponsor payouts.
+- Run all CI checks and perform end-to-end testnet validation of event creation, registration, submissions, settlement, claims, cancellation, and deadline refunds.
+- Obtain independent security review before considering any deployment beyond testnet.
 
-### 2. Link-submission winners are not checked against submissions
-For `Challenge::Submission`, `finalize` accepts host-selected registered accounts but does not verify that each selected account submitted a proof link.
-
-**Required fix:** Require every selected winner to appear in `submissions`. The contract can verify that a proof was submitted, but cannot judge its quality.
-
-### 3. Refund and payout lifecycle needs broader coverage
-The current tests cover a successful claim entering `InFlight`, but do not demonstrate callback behavior for both successful and failed transfers, repeated claims, or a refund/settlement race.
-
-**Required tests:** callback success marks `Paid`; callback failure restores `Pending`; only the recipient can claim; a second claim while `InFlight` is rejected; settlement/refund cannot create duplicate payouts.
-
-## Frontend review
-
-The current app is a single static HTML page. It has the essential contract actions, but lacks a full dashboard, event discovery experience, clear transaction history, and structured mobile navigation. This branch refreshes its visual foundation and responsive form styling while preserving the existing DOM IDs and contract calls.
+## Frontend
+The static frontend is configured for NEAR testnet only. Its create/register forms now reflect sponsor-funded pools and free participant registration. Browser-based end-to-end validation has not yet been performed.
 
 ## Release gate
-- Keep the app on testnet during development.
-- Do not use the current mainnet configuration with real funds.
-- Fix the winner-selection issues and add regression tests before any testnet release candidate.
-- Verify wallet connection, event creation, deposits, submissions, settlement, claims, failed-transfer retries, and refunds on testnet.
-- Obtain an independent review before any mainnet consideration.
+- Keep the app on testnet and use test tokens only.
+- Do not use participant stakes, wagers, or deposits.
+- Do not deploy to mainnet or hold real funds.
+- Require passing CI, complete lifecycle tests, end-to-end testnet validation, and independent security review before reassessing release readiness.
