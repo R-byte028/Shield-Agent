@@ -16,8 +16,8 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
       - name: Run contract unit tests
-        run: cargo test --locked
+        run: cargo test
       - name: Check WebAssembly build
         run: |
           rustup target add wasm32-unknown-unknown
-          cargo build --locked --target wasm32-unknown-unknown --release
+          cargo build --target wasm32-unknown-unknown --release
