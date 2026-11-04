@@ -1,19 +1,34 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Show-Up Pot (mainnet)</title>
+<title>Show-Up Pot | On-chain Event Escrow</title>
 <style>
-body{font:15px system-ui,sans-serif;max-width:640px;margin:auto;padding:16px;background:#0f1115;color:#e8e8e8}
-h1{font-size:22px}h2{font-size:16px;margin:0 0 8px}
-section{background:#181b22;border-radius:10px;padding:14px;margin:12px 0}
-input,select,button{font:inherit;padding:8px;margin:3px 0;width:100%;box-sizing:border-box;border-radius:6px;border:1px solid #333;background:#0f1115;color:inherit}
-button{background:#00ec97;color:#000;border:0;font-weight:600;cursor:pointer}
-button.alt{background:#2a2f3a;color:#e8e8e8}
-pre{white-space:pre-wrap;word-break:break-all;background:#0f1115;padding:8px;border-radius:6px;max-height:240px;overflow:auto}
-small{color:#9aa}
+:root{color-scheme:dark;--bg:#090d14;--panel:#111925;--panel2:#151f2d;--line:#263447;--text:#edf4ff;--muted:#91a2b8;--mint:#69f0c1;--blue:#7aa8ff;--danger:#ff8f9a}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 80% 0%,#173044 0,transparent 38%),var(--bg);color:var(--text);font:15px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:1120px;padding:32px 24px 64px;margin:auto}
+h1{font-size:clamp(30px,5vw,44px);letter-spacing:-1.5px;line-height:1.08;margin:10px 0 12px}
+h2{font-size:17px;letter-spacing:-.2px;margin:0 0 16px}
+small{color:var(--muted)}
+body>small{display:block;max-width:620px;font-size:15px;line-height:1.6;margin-bottom:24px}
+body>h1:before{content:"";display:inline-block;width:9px;height:30px;border-radius:9px;background:var(--mint);margin-right:12px;vertical-align:-3px}
+body>section{background:linear-gradient(145deg,rgba(21,31,45,.96),rgba(14,21,32,.96));border:1px solid var(--line);border-radius:18px;padding:22px;margin:16px 0;box-shadow:0 14px 40px #0003}
+section h2{display:flex;align-items:center;gap:10px}
+section h2:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--mint);box-shadow:0 0 14px #69f0c177}
+input,select,button{font:inherit;width:100%;min-height:46px;padding:11px 13px;margin:5px 0;border-radius:10px;border:1px solid #304158;background:#0b121c;color:var(--text);outline:none;transition:border-color .18s,box-shadow .18s,transform .18s}
+input::placeholder{color:#71839b}
+input:focus,select:focus{border-color:var(--mint);box-shadow:0 0 0 3px #69f0c11c}
+button{background:var(--mint);color:#07130f;border:0;font-weight:750;cursor:pointer}
+button:hover{filter:brightness(1.06);transform:translateY(-1px)}
+button.alt{background:#202d3e;color:var(--text);border:1px solid #35465c}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#080e16;border:1px solid var(--line);padding:14px;border-radius:12px;max-height:300px;overflow:auto;color:#c7d8ed;font:13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
+#who{padding:10px 12px;background:#0b121c;border-radius:9px;margin-top:8px}
+#log{border-color:#35516a;margin-top:20px}
+#cid{border-color:#43617a}
+@media(min-width:760px){body{padding-top:48px}body>section{padding:24px 26px}section input,section select{width:calc(50% - 10px);margin:5px 4px 5px 0}section button{width:auto;min-width:170px;padding-left:20px;padding-right:20px;margin:8px 8px 0 0}#who{display:inline-block;min-width:220px;margin-left:8px}}
+@media(max-width:520px){body{padding:22px 14px 40px}body>section{padding:17px;border-radius:14px}h1{font-size:32px}section button{min-height:48px}}
 </style></head><body>
 <h1>Show-Up Pot</h1>
-<small>Deposit, show up, solve the challenge, split the pot. NEAR MAINNET: real money, unaudited.</small>
+<small>On-chain event escrow · Built on NEAR<br>Deposit, show up, complete the challenge and share the pot. Prototype interface — do not use with real funds.</small>
 
 <section><h2>1. Connect</h2>
 <input id="cid" placeholder="Contract account (e.g. showup.yourname.near)">
