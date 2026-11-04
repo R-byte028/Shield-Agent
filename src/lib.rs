@@ -234,11 +234,23 @@ impl Contract {
         let code_event = matches!(e.challenge, Challenge::Code { .. });
         require!(now > e.submit_by || all_claimed, "submissions still open");
         require!(now <= e.finalize_by, "deadline passed, use refund");
-        // Guest-pays, or code event with a winner limit: the contract decides (first N)
-        if e.min_deposit.as_yoctonear() > 0 || (code_event && e.num_winners.is_some()) {
+        // Code-challenge winners must always be determined by successful on-chain
+        // submissions, regardless of who funded the event or whether a cap is set.
+        if code_event {
             require!(winners.is_none(), "winners are set by the code challenge");
         }
         let winners = winners.unwrap_or_else(|| e.completed.clone());
+
+        // A host may choose winners for link-submission events, but only from
+        // accounts that actually submitted a proof link.
+        if matches!(e.challenge, Challenge::Submission) {
+            for winner in &winners {
+                require!(
+                    e.submissions.iter().any(|(guest, _)| guest == winner),
+                    "winner did not submit proof"
+                );
+            }
+        }
         if let Some(n) = e.num_winners {
             require!(winners.len() as u32 <= n, "more winners than the event allows");
         }
@@ -448,6 +460,58 @@ mod tests {
         assert_eq!(event.payouts[0].status, PayoutStatus::InFlight);
         // The mocked VM does not expose promise receipts consistently here;
         // the InFlight state verifies that the claim was accepted.
+    }
+
+    #[test]
+    #[should_panic(expected = "winners are set by the code challenge")]
+    fn host_funded_code_event_without_cap_rejects_host_selected_winners() {
+        let mut c = setup(0, 10 * N, None);
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(0), 0, 25);
+        c.finalize(0, Some(vec![accounts(1)]));
+    }
+
+    #[test]
+    fn uncapped_code_event_pays_only_successful_code_submitters() {
+        let mut c = setup(0, 10 * N, None);
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit_code(0, "secret".into());
+        ctx(accounts(0), 0, 25);
+        c.finalize(0, None);
+        let event = c.get_event(0).unwrap();
+        assert_eq!(event.payouts.len(), 1);
+        assert_eq!(event.payouts[0].recipient, accounts(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "winner did not submit proof")]
+    fn submission_event_rejects_winner_without_proof() {
+        let mut c = Contract::new();
+        ctx(accounts(0), 10 * N, 1);
+        c.create_event("links".into(), NearToken::from_yoctonear(0), None, true, None, 10, 20, 30);
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(0), 0, 25);
+        c.finalize(0, Some(vec![accounts(1)]));
+    }
+
+    #[test]
+    fn submission_event_accepts_registered_proof_submitter() {
+        let mut c = Contract::new();
+        ctx(accounts(0), 10 * N, 1);
+        c.create_event("links".into(), NearToken::from_yoctonear(0), None, true, None, 10, 20, 30);
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit(0, "https://example.com/proof".into());
+        ctx(accounts(0), 0, 25);
+        c.finalize(0, Some(vec![accounts(1)]));
+        let event = c.get_event(0).unwrap();
+        assert_eq!(event.payouts.len(), 1);
+        assert_eq!(event.payouts[0].recipient, accounts(1));
     }
 
     #[test]
