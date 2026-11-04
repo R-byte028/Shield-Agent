@@ -41,6 +41,7 @@ small{color:#9aa}
 <button id="reg">Register</button>
 <input id="gcode" placeholder="Code / puzzle answer">
 <button id="subcode">Submit code</button>
+<button class="alt" id="claim">Claim my payout</button>
 <input id="link" placeholder="https:// link to your submission">
 <button id="sublink">Submit link</button></section>
 
@@ -82,9 +83,11 @@ $('create').onclick=async()=>{
 $('load').onclick=async()=>{try{const e=await view('get_event',{id:id()});
   if(!e)return $('ev').textContent='No such event';
   const y=v=>nearAPI.utils.format.formatNearAmount(v,2)+' NEAR';
-  $('ev').textContent=`${e.title}\nMode: ${e.min_deposit==='0'?'host-funded':'guest-pays (min '+y(e.min_deposit)+')'}\nPot: ${y(e.pot)}\nWinners allowed: ${e.num_winners??'no limit'}\nGuests: ${e.guests.length}\nSolved: ${e.completed.length}\nSettled: ${e.done}`}catch(x){$('ev').textContent=x.message||x}};
+  $('ev').textContent=`${e.title}\nMode: ${e.min_deposit==='0'?'host-funded':'guest-pays (min '+y(e.min_deposit)+')'}\nPot: ${y(e.pot)}\nWinners allowed: ${e.num_winners??'no limit'}\nGuests: ${e.guests.length}\nSolved: ${e.completed.length}\nSettled: ${e.done}
+Payouts: ${(e.payouts||[]).map(p=>p.recipient+': '+y(p.amount)+' ['+p.status+']').join('\n')||'none'}`}catch(x){$('ev').textContent=x.message||x}};
 $('reg').onclick=()=>call('register',{id:id()},toY($('stake').value));
 $('subcode').onclick=()=>call('submit_code',{id:id(),code:$('gcode').value});
+$('claim').onclick=()=>call('claim_payout',{id:id()});
 $('sublink').onclick=()=>call('submit',{id:id(),proof:$('link').value});
 $('fin').onclick=()=>{const w=$('win').value.split(',').map(s=>s.trim()).filter(Boolean);call('finalize',{id:id(),winners:w.length?w:null})};
 $('cancel').onclick=()=>call('cancel',{id:id()});
