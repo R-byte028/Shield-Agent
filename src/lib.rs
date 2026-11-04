@@ -2,12 +2,7 @@ use near_sdk::json_types::Base64VecU8;
 use near_sdk::store::IterableMap;
 use near_sdk::{env, near, require, AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseResult};
 
-uint::construct_uint! {
-    /// 256-bit int so stake * pot can't overflow u128
-    pub struct U256(4);
-}
-
-const MAX_GUESTS: usize = 100; // keeps gas bounded when paying out
+ const MAX_GUESTS: usize = 100; // keeps gas bounded when paying out
 
 #[near(serializers = [borsh, json])]
 #[derive(Clone)]
@@ -41,10 +36,9 @@ pub struct Payout {
 pub struct Event {
     pub host: AccountId,
     pub title: String,
-    /// 0 = host-funded (guests join free). >0 = guest-pays: each guest chooses
-    /// their own amount, at least this minimum.
+    /// Retained as a zero-valued compatibility field; participant deposits are disabled.
     pub min_deposit: NearToken,
-    pub pot: NearToken,            // host seed + all guest deposits
+    pub pot: NearToken,            // sponsor/host-funded prize pool only
     pub host_funded: NearToken,
     pub challenge: Challenge,
     /// How many winners the host wants (None = no limit). Code events: the first N
@@ -55,7 +49,8 @@ pub struct Event {
     pub submit_by: u64,            // codes/links accepted until here
     pub finalize_by: u64,          // host must settle before this; after it anyone can refund
     pub guests: Vec<AccountId>,
-    pub stakes: Vec<NearToken>,    // stakes[i] = amount guests[i] deposited
+    /// Retained for serialized-state compatibility; all entries are zero.
+    pub stakes: Vec<NearToken>,
     pub completed: Vec<AccountId>,
     pub submissions: Vec<(AccountId, String)>,
     /// Pull-based payouts. Failed transfers return to Pending through the callback.
@@ -77,8 +72,8 @@ impl Contract {
         Self { events: IterableMap::new(b"e"), next_id: 0 }
     }
 
-    /// Host creates an event. Any attached NEAR becomes the host-funded pot.
-    /// min_deposit > 0 makes it guest-pays (guests pick their own amount >= min).
+    /// Host creates a sponsor-funded event. Attached NEAR is the only prize funding.
+    /// Participant deposits are disabled; min_deposit must be zero.
     #[payable]
     pub fn create_event(
         &mut self,
@@ -100,11 +95,10 @@ impl Contract {
             env::block_timestamp() < register_by && register_by <= submit_by && submit_by < finalize_by,
             "bad timeline: now < register_by <= submit_by < finalize_by"
         );
-        let guest_pays = min_deposit.as_yoctonear() > 0;
-        // Guest-pays events must use the code challenge so winners aren't host-picked
-        if guest_pays {
-            require!(code_hash.is_some(), "guest-pays events need a code challenge");
-        }
+        require!(
+            min_deposit.as_yoctonear() == 0,
+            "participant deposits are disabled; sponsor-funded events only"
+        );
         if let Some(n) = num_winners {
             require!(n > 0 && (n as usize) <= MAX_GUESTS, "num_winners must be 1..=100");
         }
@@ -137,8 +131,7 @@ impl Contract {
         id
     }
 
-    /// Guest registers. Guest-pays: attach any amount >= min_deposit (your stake).
-    /// Host-funded: attach nothing.
+    /// Guests register for free. Only the host/sponsor funds the prize pool.
     #[payable]
     pub fn register(&mut self, id: u64) {
         let e = self.events.get_mut(&id).expect("no event");
@@ -149,14 +142,12 @@ impl Contract {
         require!(me != e.host, "host can't register in own event");
         require!(!e.guests.contains(&me), "already registered");
         require!(e.guests.len() < MAX_GUESTS, "event full");
-        if e.min_deposit.as_yoctonear() > 0 {
-            require!(amount >= e.min_deposit, "deposit below the minimum");
-        } else {
-            require!(amount.as_yoctonear() == 0, "this event is free to join");
-        }
-        e.pot = e.pot.saturating_add(amount);
+        require!(
+            amount.as_yoctonear() == 0,
+            "registration is free; participant deposits are disabled"
+        );
         e.guests.push(me);
-        e.stakes.push(amount);
+        e.stakes.push(NearToken::from_yoctonear(0));
     }
 
     /// Code / puzzle answer.
@@ -218,12 +209,8 @@ impl Contract {
         Self::refund_all(e);
     }
 
-    /// Host settles, only inside the window (submit_by, finalize_by]
-    /// (or earlier if all first-come-first-served prizes are claimed).
-    /// Guest-pays: winners = code completers; the whole pot is shared in
-    /// proportion to each winner's own stake. Host-funded: even split among
-    /// winners (host-picked, or code completers / first N). No winners =
-    /// everyone is refunded their own stake.
+    /// Host settles inside the allowed window. The sponsor-funded prize pool is
+    /// split evenly among eligible winners. No winners means the sponsor is refunded.
     pub fn finalize(&mut self, id: u64, winners: Option<Vec<AccountId>>) {
         let e = self.events.get_mut(&id).expect("no event");
         require!(env::predecessor_account_id() == e.host, "host only");
@@ -254,11 +241,9 @@ impl Contract {
         if let Some(n) = e.num_winners {
             require!(winners.len() as u32 <= n, "more winners than the event allows");
         }
-        let mut stakes: Vec<u128> = vec![];
         for (i, w) in winners.iter().enumerate() {
-            let idx = e.guests.iter().position(|g| g == w).expect("winner not registered");
+            require!(e.guests.contains(w), "winner not registered");
             require!(!winners[..i].contains(w), "duplicate winner");
-            stakes.push(e.stakes[idx].as_yoctonear());
         }
         e.done = true;
         if winners.is_empty() {
@@ -266,7 +251,7 @@ impl Contract {
             return;
         }
         let total = e.pot.as_yoctonear();
-        let amounts = split_pot(total, &stakes);
+        let amounts = split_pot(total, &vec![0; winners.len()]);
         e.payouts.clear();
         for (recipient, amount) in winners.into_iter().zip(amounts) {
             if amount > 0 {
@@ -331,15 +316,8 @@ impl Contract {
 impl Contract {
     fn refund_all(e: &mut Event) {
         e.payouts.clear();
-        for (guest, stake) in e.guests.iter().zip(e.stakes.iter()) {
-            if stake.as_yoctonear() > 0 {
-                e.payouts.push(Payout {
-                    recipient: guest.clone(),
-                    amount: *stake,
-                    status: PayoutStatus::Pending,
-                });
-            }
-        }
+        // Participants never deposit funds; only return the sponsor's seed.
+        
         if e.host_funded.as_yoctonear() > 0 {
             e.payouts.push(Payout {
                 recipient: e.host.clone(),
@@ -350,34 +328,16 @@ impl Contract {
     }
 }
 
-/// Splits `total` among winners in proportion to their stakes (even
-/// split if all stakes are 0). The first winner gets the remainder, so nothing
-/// is left behind.
-pub fn split_pot(total: u128, stakes: &[u128]) -> Vec<u128> {
-    if stakes.is_empty() {
+/// Splits a sponsor-funded prize pool evenly. Any rounding remainder goes
+/// to the first winner so the full pool is allocated without dust.
+pub fn split_pot(total: u128, recipients: &[u128]) -> Vec<u128> {
+    if recipients.is_empty() {
         return vec![];
     }
-
-    // Sum in U256: up to 100 individually valid u128 stakes can overflow u128.
-    let sum = stakes
-        .iter()
-        .fold(U256::zero(), |acc, stake| acc + U256::from(*stake));
-    let count = U256::from(stakes.len() as u128);
-
-    let mut out: Vec<u128> = stakes
-        .iter()
-        .map(|stake| {
-            if sum.is_zero() {
-                (U256::from(total) / count).as_u128()
-            } else {
-                (U256::from(total) * U256::from(*stake) / sum).as_u128()
-            }
-        })
-        .collect();
-
-    // Assign rounding dust to the first winner so the payout is exact.
-    let paid_to_others: u128 = out.iter().skip(1).sum();
-    out[0] = total - paid_to_others;
+    let count = recipients.len() as u128;
+    let share = total / count;
+    let mut out = vec![share; recipients.len()];
+    out[0] += total % count;
     out
 }
 
@@ -407,19 +367,17 @@ mod tests {
     }
 
     #[test]
-    fn split_is_proportional_and_exact() {
-        let out = split_pot(20 * N, &[N, 3 * N, 6 * N]);
+    fn sponsor_pool_is_split_evenly_and_exactly() {
+        let out = split_pot(20 * N, &[0, 0, 0]);
+        assert_eq!(out, vec![20 * N / 3 + 2 * N, 20 * N / 3, 20 * N / 3]);
         assert_eq!(out.iter().sum::<u128>(), 20 * N);
-        assert_eq!(out[1], 6 * N);
-        assert_eq!(out[2], 12 * N);
-        assert_eq!(split_pot(10, &[0, 0, 0]).iter().sum::<u128>(), 10);
+        assert_eq!(split_pot(10, &[0, 0, 0]), vec![4, 3, 3]);
     }
 
     #[test]
-    fn split_handles_empty_and_extreme_stakes() {
+    fn split_handles_empty_and_maximum_pool() {
         assert!(split_pot(100, &[]).is_empty());
-
-        let out = split_pot(u128::MAX, &[u128::MAX, u128::MAX, u128::MAX]);
+        let out = split_pot(u128::MAX, &[0, 0, 0]);
         assert_eq!(out.iter().try_fold(0u128, |sum, amount| sum.checked_add(*amount)), Some(u128::MAX));
         assert_eq!(out[1], u128::MAX / 3);
         assert_eq!(out[2], u128::MAX / 3);
@@ -515,13 +473,32 @@ mod tests {
     }
 
     #[test]
-    fn guest_pays_settles_after_window() {
-        let mut c = setup(N, 0, None);
-        for (g, stake) in [(1, N), (2, 3 * N), (3, 6 * N)] { ctx(accounts(g), stake, 5); c.register(0); }
-        for g in 1..=2 { ctx(accounts(g), 0, 15); c.submit_code(0, "secret".into()); }
+    #[should_panic(expected = "participant deposits are disabled")]
+    fn event_creation_rejects_participant_stake_mode() {
+        let mut c = Contract::new();
+        ctx(accounts(0), 0, 1);
+        c.create_event("no stakes".into(), NearToken::from_yoctonear(N), Some(code_hash()), false, None, 10, 20, 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "registration is free")]
+    fn guest_cannot_attach_a_participant_deposit() {
+        let mut c = setup(0, 10 * N, None);
+        ctx(accounts(1), N, 5);
+        c.register(0);
+    }
+
+    #[test]
+    fn sponsor_funded_event_pays_equal_rewards() {
+        let mut c = setup(0, 9 * N, None);
+        for g in 1..=3 { ctx(accounts(g), 0, 5); c.register(0); }
+        for g in 1..=3 { ctx(accounts(g), 0, 6); c.submit_code(0, "secret".into()); }
         ctx(accounts(0), 0, 25);
         c.finalize(0, None);
-        assert_eq!(c.get_event(0).unwrap().payouts.len(), 2);
+        let payouts = c.get_event(0).unwrap().payouts;
+        assert_eq!(payouts.len(), 3);
+        assert_eq!(payouts.iter().map(|p| p.amount.as_yoctonear()).sum::<u128>(), 9 * N);
+        assert!(payouts.iter().all(|p| p.amount.as_yoctonear() == 3 * N));
     }
 
     #[test]
