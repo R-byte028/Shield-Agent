@@ -36,10 +36,8 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#080e16;border:1px so
 
 <section><h2>2. Create event (host)</h2>
 <input id="title" placeholder="Event title">
-<select id="mode"><option value="host">Host-funded (guests join free)</option><option value="guest">Guest-pays (guests pick their stake)</option></select>
-<input id="seed" placeholder="Host prize pot in NEAR (host-funded) or optional seed (guest-pays)">
-<input id="min" placeholder="Minimum guest stake in NEAR (guest-pays only)">
-<input id="code" placeholder="Secret code / puzzle answer (required for guest-pays)">
+<input id="seed" placeholder="Sponsor-funded prize pool in NEAR">
+<input id="code" placeholder="Secret code / puzzle answer (optional)">
 <input id="nw" placeholder="Number of winners (blank = no limit)">
 <small>Minutes from now until:</small>
 <input id="t1" placeholder="Registration closes (min)" value="30">
@@ -52,7 +50,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#080e16;border:1px so
 <button class="alt" id="load">Load</button><pre id="ev">-</pre></section>
 
 <section><h2>Guest actions</h2>
-<input id="stake" placeholder="Your stake in NEAR (guest-pays) / 0 (free)">
+<small>Registration is free. Participants never deposit funds.</small>
 <button id="reg">Register</button>
 <input id="gcode" placeholder="Code / puzzle answer">
 <button id="subcode">Submit code</button>
@@ -89,18 +87,17 @@ const view=(m,args)=>(acct||wallet.account()).viewFunction({contractId:cid(),met
 const id=()=>parseInt($('eid').value,10);
 async function sha64(t){const h=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t)));return btoa(String.fromCharCode(...h))}
 $('create').onclick=async()=>{
-  const guest=$('mode').value==='guest', code=$('code').value;
-  if(guest&&!code)return log('Guest-pays events need a secret code');
-  await call('create_event',{title:$('title').value,min_deposit:guest?toY($('min').value):'0',
-    code_hash:code?await sha64(code):null,submissions_mode:!guest&&!code,
+  const code=$('code').value;
+  await call('create_event',{title:$('title').value,min_deposit:'0',
+    code_hash:code?await sha64(code):null,submissions_mode:!code,
     num_winners:$('nw').value?parseInt($('nw').value,10):null,
     register_by:ns(+$('t1').value),submit_by:ns(+$('t2').value),finalize_by:ns(+$('t3').value)},toY($('seed').value))};
 $('load').onclick=async()=>{try{const e=await view('get_event',{id:id()});
   if(!e)return $('ev').textContent='No such event';
   const y=v=>nearAPI.utils.format.formatNearAmount(v,2)+' NEAR';
-  $('ev').textContent=`${e.title}\nMode: ${e.min_deposit==='0'?'host-funded':'guest-pays (min '+y(e.min_deposit)+')'}\nPot: ${y(e.pot)}\nWinners allowed: ${e.num_winners??'no limit'}\nGuests: ${e.guests.length}\nSolved: ${e.completed.length}\nSettled: ${e.done}
+  $('ev').textContent=`${e.title}\nFunding: sponsor-funded (no participant stakes)\nPot: ${y(e.pot)}\nWinners allowed: ${e.num_winners??'no limit'}\nGuests: ${e.guests.length}\nSolved: ${e.completed.length}\nSettled: ${e.done}
 Payouts: ${(e.payouts||[]).map(p=>p.recipient+': '+y(p.amount)+' ['+p.status+']').join('\n')||'none'}`}catch(x){$('ev').textContent=x.message||x}};
-$('reg').onclick=()=>call('register',{id:id()},toY($('stake').value));
+$('reg').onclick=()=>call('register',{id:id()});
 $('subcode').onclick=()=>call('submit_code',{id:id(),code:$('gcode').value});
 $('claim').onclick=()=>call('claim_payout',{id:id()});
 $('sublink').onclick=()=>call('submit',{id:id(),proof:$('link').value});
