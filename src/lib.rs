@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn sponsor_pool_is_split_evenly_and_exactly() {
         let out = split_pot(20 * N, &[0, 0, 0]);
-        assert_eq!(out, vec![20 * N / 3 + 2 * N, 20 * N / 3, 20 * N / 3]);
+        assert_eq!(out, vec![20 * N / 3 + 2, 20 * N / 3, 20 * N / 3]);
         assert_eq!(out.iter().sum::<u128>(), 20 * N);
         assert_eq!(split_pot(10, &[0, 0, 0]), vec![4, 3, 3]);
     }
