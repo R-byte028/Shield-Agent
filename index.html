@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Show-Up Pot (mainnet)</title>
+<style>
+body{font:15px system-ui,sans-serif;max-width:640px;margin:auto;padding:16px;background:#0f1115;color:#e8e8e8}
+h1{font-size:22px}h2{font-size:16px;margin:0 0 8px}
+section{background:#181b22;border-radius:10px;padding:14px;margin:12px 0}
+input,select,button{font:inherit;padding:8px;margin:3px 0;width:100%;box-sizing:border-box;border-radius:6px;border:1px solid #333;background:#0f1115;color:inherit}
+button{background:#00ec97;color:#000;border:0;font-weight:600;cursor:pointer}
+button.alt{background:#2a2f3a;color:#e8e8e8}
+pre{white-space:pre-wrap;word-break:break-all;background:#0f1115;padding:8px;border-radius:6px;max-height:240px;overflow:auto}
+small{color:#9aa}
+</style></head><body>
+<h1>Show-Up Pot</h1>
+<small>Deposit, show up, solve the challenge, split the pot. NEAR MAINNET: real money, unaudited.</small>
+
+<section><h2>1. Connect</h2>
+<input id="cid" placeholder="Contract account (e.g. showup.yourname.near)">
+<button id="login">Connect wallet</button><div id="who"><small>Not connected</small></div></section>
+
+<section><h2>2. Create event (host)</h2>
+<input id="title" placeholder="Event title">
+<select id="mode"><option value="host">Host-funded (guests join free)</option><option value="guest">Guest-pays (guests pick their stake)</option></select>
+<input id="seed" placeholder="Host prize pot in NEAR (host-funded) or optional seed (guest-pays)">
+<input id="min" placeholder="Minimum guest stake in NEAR (guest-pays only)">
+<input id="code" placeholder="Secret code / puzzle answer (required for guest-pays)">
+<input id="nw" placeholder="Number of winners (blank = no limit)">
+<small>Minutes from now until:</small>
+<input id="t1" placeholder="Registration closes (min)" value="30">
+<input id="t2" placeholder="Submissions close (min)" value="60">
+<input id="t3" placeholder="Settle-by deadline (min)" value="120">
+<button id="create">Create event</button></section>
+
+<section><h2>3. Open event</h2>
+<input id="eid" placeholder="Event ID" value="0">
+<button class="alt" id="load">Load</button><pre id="ev">-</pre></section>
+
+<section><h2>Guest actions</h2>
+<input id="stake" placeholder="Your stake in NEAR (guest-pays) / 0 (free)">
+<button id="reg">Register</button>
+<input id="gcode" placeholder="Code / puzzle answer">
+<button id="subcode">Submit code</button>
+<input id="link" placeholder="https:// link to your submission">
+<button id="sublink">Submit link</button></section>
+
+<section><h2>Host actions</h2>
+<input id="win" placeholder="Winner accounts, comma separated (host-picked events only)">
+<button id="fin">Settle &amp; pay out</button>
+<button class="alt" id="subs">Show submitted links</button>
+<button class="alt" id="cancel">Cancel event</button>
+<button class="alt" id="refund">Refund everyone (after deadline)</button></section>
+<pre id="log"></pre>
+
+<script src="https://cdn.jsdelivr.net/npm/near-api-js@2.1.4/dist/near-api-js.min.js"></script>
+<script>
+const $=id=>document.getElementById(id), log=m=>$('log').textContent=String(m);
+const cfg={networkId:'mainnet',nodeUrl:'https://rpc.mainnet.near.org',walletUrl:'https://app.mynearwallet.com',helperUrl:'https://helper.mainnet.near.org'};
+let wallet,acct;
+$('cid').value=localStorage.getItem('cid')||'';
+const GAS='100000000000000', ns=min=>String((Date.now()+min*60000)*1e6);
+const toY=v=>nearAPI.utils.format.parseNearAmount((v||'0').trim()||'0');
+(async()=>{
+  const near=await nearAPI.connect({...cfg,keyStore:new nearAPI.keyStores.BrowserLocalStorageKeyStore()});
+  wallet=new nearAPI.WalletConnection(near,'showup');
+  if(wallet.isSignedIn()){acct=wallet.account();$('who').innerHTML='<small>Signed in as '+wallet.getAccountId()+'</small>'}
+})();
+$('login').onclick=()=>{localStorage.setItem('cid',$('cid').value.trim());wallet.requestSignIn({contractId:$('cid').value.trim()})};
+const cid=()=>$('cid').value.trim();
+const call=async(m,args,dep)=>{try{if(!acct)throw 'Connect your wallet first';log('Sending '+m+'...');
+  await acct.functionCall({contractId:cid(),methodName:m,args,gas:GAS,attachedDeposit:dep||'0'});log(m+' done')}catch(e){log('Error: '+(e.message||e))}};
+const view=(m,args)=>(acct||wallet.account()).viewFunction({contractId:cid(),methodName:m,args});
+const id=()=>parseInt($('eid').value,10);
+async function sha64(t){const h=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t)));return btoa(String.fromCharCode(...h))}
+$('create').onclick=async()=>{
+  const guest=$('mode').value==='guest', code=$('code').value;
+  if(guest&&!code)return log('Guest-pays events need a secret code');
+  await call('create_event',{title:$('title').value,min_deposit:guest?toY($('min').value):'0',
+    code_hash:code?await sha64(code):null,submissions_mode:!guest&&!code,
+    num_winners:$('nw').value?parseInt($('nw').value,10):null,
+    register_by:ns(+$('t1').value),submit_by:ns(+$('t2').value),finalize_by:ns(+$('t3').value)},toY($('seed').value))};
+$('load').onclick=async()=>{try{const e=await view('get_event',{id:id()});
+  if(!e)return $('ev').textContent='No such event';
+  const y=v=>nearAPI.utils.format.formatNearAmount(v,2)+' NEAR';
+  $('ev').textContent=`${e.title}\nMode: ${e.min_deposit==='0'?'host-funded':'guest-pays (min '+y(e.min_deposit)+')'}\nPot: ${y(e.pot)}\nWinners allowed: ${e.num_winners??'no limit'}\nGuests: ${e.guests.length}\nSolved: ${e.completed.length}\nSettled: ${e.done}`}catch(x){$('ev').textContent=x.message||x}};
+$('reg').onclick=()=>call('register',{id:id()},toY($('stake').value));
+$('subcode').onclick=()=>call('submit_code',{id:id(),code:$('gcode').value});
+$('sublink').onclick=()=>call('submit',{id:id(),proof:$('link').value});
+$('fin').onclick=()=>{const w=$('win').value.split(',').map(s=>s.trim()).filter(Boolean);call('finalize',{id:id(),winners:w.length?w:null})};
+$('cancel').onclick=()=>call('cancel',{id:id()});
+$('refund').onclick=()=>call('refund',{id:id()});
+$('subs').onclick=async()=>{try{log(JSON.stringify(await view('get_submissions',{id:id()}),null,1))}catch(x){log(x.message||x)}};
+</script></body></html>
