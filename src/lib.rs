@@ -1,6 +1,6 @@
 use near_sdk::json_types::Base64VecU8;
 use near_sdk::store::IterableMap;
-use near_sdk::{env, near, require, AccountId, NearToken, PanicOnDefault, Promise};
+use near_sdk::{env, near, require, AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseResult};
 
 uint::construct_uint! {
     /// 256-bit int so stake * pot can't overflow u128
@@ -18,6 +18,22 @@ pub enum Challenge {
     Code { hash: Vec<u8> },
     /// Guests submit links; host picks winners (host-funded events only)
     Submission,
+}
+
+#[near(serializers = [borsh, json])]
+#[derive(Clone, PartialEq)]
+pub enum PayoutStatus {
+    Pending,
+    InFlight,
+    Paid,
+}
+
+#[near(serializers = [borsh, json])]
+#[derive(Clone)]
+pub struct Payout {
+    pub recipient: AccountId,
+    pub amount: NearToken,
+    pub status: PayoutStatus,
 }
 
 #[near(serializers = [borsh, json])]
@@ -42,6 +58,8 @@ pub struct Event {
     pub stakes: Vec<NearToken>,    // stakes[i] = amount guests[i] deposited
     pub completed: Vec<AccountId>,
     pub submissions: Vec<(AccountId, String)>,
+    /// Pull-based payouts. Failed transfers return to Pending through the callback.
+    pub payouts: Vec<Payout>,
     pub done: bool,
 }
 
@@ -113,6 +131,7 @@ impl Contract {
             stakes: vec![],
             completed: vec![],
             submissions: vec![],
+            payouts: vec![],
             done: false,
         });
         id
@@ -236,11 +255,51 @@ impl Contract {
         }
         let total = e.pot.as_yoctonear();
         let amounts = split_pot(total, &stakes);
-        for (w, amt) in winners.into_iter().zip(amounts) {
-            if amt > 0 {
-                Promise::new(w).transfer(NearToken::from_yoctonear(amt));
+        e.payouts.clear();
+        for (recipient, amount) in winners.into_iter().zip(amounts) {
+            if amount > 0 {
+                e.payouts.push(Payout {
+                    recipient,
+                    amount: NearToken::from_yoctonear(amount),
+                    status: PayoutStatus::Pending,
+                });
             }
         }
+    }
+
+    /// Claim one pending payout. A failed transfer is restored to Pending by callback.
+    pub fn claim_payout(&mut self, id: u64) -> Promise {
+        let e = self.events.get_mut(&id).expect("no event");
+        let caller = env::predecessor_account_id();
+        let (index, recipient, amount) = e.payouts.iter_mut().enumerate()
+            .find(|(_, payout)| payout.recipient == caller && payout.status == PayoutStatus::Pending)
+            .map(|(index, payout)| {
+                payout.status = PayoutStatus::InFlight;
+                (index as u64, payout.recipient.clone(), payout.amount)
+            })
+            .expect("no pending payout for caller");
+
+        Promise::new(recipient)
+            .transfer(amount)
+            .then(
+                Promise::new(env::current_account_id()).function_call(
+                    "on_payout_complete".to_string(),
+                    near_sdk::serde_json::to_vec(&(id, index)).expect("serialize callback args"),
+                    NearToken::from_yoctonear(0),
+                    Gas::from_tgas(20),
+                )
+            )
+    }
+
+    /// Private callback: mark successful transfers paid, and failed transfers retryable.
+    #[private]
+    pub fn on_payout_complete(&mut self, id: u64, payout_index: u64) -> bool {
+        let succeeded = matches!(env::promise_result(0), PromiseResult::Successful(_));
+        let e = self.events.get_mut(&id).expect("no event");
+        let payout = e.payouts.get_mut(payout_index as usize).expect("no payout");
+        require!(payout.status == PayoutStatus::InFlight, "payout is not in flight");
+        payout.status = if succeeded { PayoutStatus::Paid } else { PayoutStatus::Pending };
+        succeeded
     }
 
     /// If the host never settles, anyone can trigger refunds after the deadline.
@@ -258,14 +317,23 @@ impl Contract {
 }
 
 impl Contract {
-    fn refund_all(e: &Event) {
-        for (g, s) in e.guests.iter().zip(e.stakes.iter()) {
-            if s.as_yoctonear() > 0 {
-                Promise::new(g.clone()).transfer(*s);
+    fn refund_all(e: &mut Event) {
+        e.payouts.clear();
+        for (guest, stake) in e.guests.iter().zip(e.stakes.iter()) {
+            if stake.as_yoctonear() > 0 {
+                e.payouts.push(Payout {
+                    recipient: guest.clone(),
+                    amount: *stake,
+                    status: PayoutStatus::Pending,
+                });
             }
         }
         if e.host_funded.as_yoctonear() > 0 {
-            Promise::new(e.host.clone()).transfer(e.host_funded);
+            e.payouts.push(Payout {
+                recipient: e.host.clone(),
+                amount: e.host_funded,
+                status: PayoutStatus::Pending,
+            });
         }
     }
 }
@@ -353,7 +421,7 @@ mod tests {
         ctx(accounts(0), 0, 7);
         c.finalize(0, None);
         assert!(c.get_event(0).unwrap().done);
-        assert_eq!(get_created_receipts().len(), 2);
+        assert_eq!(c.get_event(0).unwrap().payouts.len(), 2);
     }
 
     #[test]
@@ -371,7 +439,7 @@ mod tests {
         for g in 1..=2 { ctx(accounts(g), 0, 15); c.submit_code(0, "secret".into()); }
         ctx(accounts(0), 0, 25);
         c.finalize(0, None);
-        assert_eq!(get_created_receipts().len(), 2);
+        assert_eq!(c.get_event(0).unwrap().payouts.len(), 2);
     }
 
     #[test]
@@ -388,7 +456,7 @@ mod tests {
         for g in 1..=2 { ctx(accounts(g), N, 5); c.register(0); }
         ctx(accounts(4), 0, 31);
         c.refund(0);
-        assert_eq!(get_created_receipts().len(), 3); // 2 guests + host seed
+        assert_eq!(c.get_event(0).unwrap().payouts.len(), 3); // 2 guests + host seed
     }
 
     #[test]
