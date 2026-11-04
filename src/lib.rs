@@ -21,7 +21,7 @@ pub enum Challenge {
 }
 
 #[near(serializers = [borsh, json])]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PayoutStatus {
     Pending,
     InFlight,
