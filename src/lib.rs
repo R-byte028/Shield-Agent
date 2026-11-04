@@ -504,18 +504,21 @@ mod tests {
     #[test]
     #[should_panic(expected = "submissions still open")]
     fn host_cannot_settle_early() {
-        let mut c = setup(N, 0, None);
-        ctx(accounts(1), N, 5); c.register(0);
+        let mut c = setup(0, 0, None);
+        ctx(accounts(1), 0, 5); c.register(0);
         ctx(accounts(0), 0, 15); c.finalize(0, None);
     }
 
     #[test]
     fn anyone_can_refund_after_deadline() {
-        let mut c = setup(N, 5 * N, None);
-        for g in 1..=2 { ctx(accounts(g), N, 5); c.register(0); }
+        let mut c = setup(0, 5 * N, None);
+        for g in 1..=2 { ctx(accounts(g), 0, 5); c.register(0); }
         ctx(accounts(4), 0, 31);
         c.refund(0);
-        assert_eq!(c.get_event(0).unwrap().payouts.len(), 3); // 2 guests + host seed
+        let payouts = c.get_event(0).unwrap().payouts;
+        assert_eq!(payouts.len(), 1); // sponsor seed only
+        assert_eq!(payouts[0].recipient, accounts(0));
+        assert_eq!(payouts[0].amount.as_yoctonear(), 5 * N);
     }
 
     #[test]
@@ -530,7 +533,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "host can't register")]
     fn host_cannot_join_own_event() {
-        let mut c = setup(N, 0, None);
-        ctx(accounts(0), N, 5); c.register(0);
+        let mut c = setup(0, 0, None);
+        ctx(accounts(0), 0, 5); c.register(0);
     }
 }
