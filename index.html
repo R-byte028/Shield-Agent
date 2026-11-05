@@ -1,19 +1,34 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Show-Up Pot (mainnet)</title>
+<title>PactChain | On-chain Event Escrow</title>
 <style>
-body{font:15px system-ui,sans-serif;max-width:640px;margin:auto;padding:16px;background:#0f1115;color:#e8e8e8}
-h1{font-size:22px}h2{font-size:16px;margin:0 0 8px}
-section{background:#181b22;border-radius:10px;padding:14px;margin:12px 0}
-input,select,button{font:inherit;padding:8px;margin:3px 0;width:100%;box-sizing:border-box;border-radius:6px;border:1px solid #333;background:#0f1115;color:inherit}
-button{background:#00ec97;color:#000;border:0;font-weight:600;cursor:pointer}
-button.alt{background:#2a2f3a;color:#e8e8e8}
-pre{white-space:pre-wrap;word-break:break-all;background:#0f1115;padding:8px;border-radius:6px;max-height:240px;overflow:auto}
-small{color:#9aa}
+:root{color-scheme:dark;--bg:#090d14;--panel:#111925;--panel2:#151f2d;--line:#263447;--text:#edf4ff;--muted:#91a2b8;--mint:#69f0c1;--blue:#7aa8ff;--danger:#ff8f9a}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 80% 0%,#173044 0,transparent 38%),var(--bg);color:var(--text);font:15px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:1120px;padding:32px 24px 64px;margin:auto}
+h1{font-size:clamp(30px,5vw,44px);letter-spacing:-1.5px;line-height:1.08;margin:10px 0 12px}
+h2{font-size:17px;letter-spacing:-.2px;margin:0 0 16px}
+small{color:var(--muted)}
+body>small{display:block;max-width:620px;font-size:15px;line-height:1.6;margin-bottom:24px}
+body>h1:before{content:"";display:inline-block;width:9px;height:30px;border-radius:9px;background:var(--mint);margin-right:12px;vertical-align:-3px}
+body>section{background:linear-gradient(145deg,rgba(21,31,45,.96),rgba(14,21,32,.96));border:1px solid var(--line);border-radius:18px;padding:22px;margin:16px 0;box-shadow:0 14px 40px #0003}
+section h2{display:flex;align-items:center;gap:10px}
+section h2:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--mint);box-shadow:0 0 14px #69f0c177}
+input,select,button{font:inherit;width:100%;min-height:46px;padding:11px 13px;margin:5px 0;border-radius:10px;border:1px solid #304158;background:#0b121c;color:var(--text);outline:none;transition:border-color .18s,box-shadow .18s,transform .18s}
+input::placeholder{color:#71839b}
+input:focus,select:focus{border-color:var(--mint);box-shadow:0 0 0 3px #69f0c11c}
+button{background:var(--mint);color:#07130f;border:0;font-weight:750;cursor:pointer}
+button:hover{filter:brightness(1.06);transform:translateY(-1px)}
+button.alt{background:#202d3e;color:var(--text);border:1px solid #35465c}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#080e16;border:1px solid var(--line);padding:14px;border-radius:12px;max-height:300px;overflow:auto;color:#c7d8ed;font:13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
+#who{padding:10px 12px;background:#0b121c;border-radius:9px;margin-top:8px}
+#log{border-color:#35516a;margin-top:20px}
+#cid{border-color:#43617a}
+@media(min-width:760px){body{padding-top:48px}body>section{padding:24px 26px}section input,section select{width:calc(50% - 10px);margin:5px 4px 5px 0}section button{width:auto;min-width:170px;padding-left:20px;padding-right:20px;margin:8px 8px 0 0}#who{display:inline-block;min-width:220px;margin-left:8px}}
+@media(max-width:520px){body{padding:22px 14px 40px}body>section{padding:17px;border-radius:14px}h1{font-size:32px}section button{min-height:48px}}
 </style></head><body>
-<h1>Show-Up Pot</h1>
-<small>Deposit, show up, solve the challenge, split the pot. NEAR MAINNET: real money, unaudited.</small>
+<h1>PactChain</h1>
+<small>Sponsor-funded event escrow · NEAR TESTNET ONLY<br>Create transparent community challenges, verify submissions on-chain, and distribute sponsor-funded rewards. Prototype only — use testnet tokens, never real funds.</small>
 
 <section><h2>1. Connect</h2>
 <input id="cid" placeholder="Contract account (e.g. showup.yourname.near)">
@@ -21,23 +36,21 @@ small{color:#9aa}
 
 <section><h2>2. Create event (host)</h2>
 <input id="title" placeholder="Event title">
-<select id="mode"><option value="host">Host-funded (guests join free)</option><option value="guest">Guest-pays (guests pick their stake)</option></select>
-<input id="seed" placeholder="Host prize pot in NEAR (host-funded) or optional seed (guest-pays)">
-<input id="min" placeholder="Minimum guest stake in NEAR (guest-pays only)">
-<input id="code" placeholder="Secret code / puzzle answer (required for guest-pays)">
+<input id="seed" placeholder="Sponsor-funded reward pool in testnet NEAR">
+<input id="code" placeholder="Secret code / puzzle answer (optional)">
 <input id="nw" placeholder="Number of winners (blank = no limit)">
 <small>Minutes from now until:</small>
 <input id="t1" placeholder="Registration closes (min)" value="30">
 <input id="t2" placeholder="Submissions close (min)" value="60">
 <input id="t3" placeholder="Settle-by deadline (min)" value="120">
-<button id="create">Create event</button></section>
+<button id="create">Create sponsored event</button></section>
 
 <section><h2>3. Open event</h2>
 <input id="eid" placeholder="Event ID" value="0">
 <button class="alt" id="load">Load</button><pre id="ev">-</pre></section>
 
 <section><h2>Guest actions</h2>
-<input id="stake" placeholder="Your stake in NEAR (guest-pays) / 0 (free)">
+<small>Registration is free. Participants never deposit funds.</small>
 <button id="reg">Register</button>
 <input id="gcode" placeholder="Code / puzzle answer">
 <button id="subcode">Submit code</button>
@@ -50,20 +63,20 @@ small{color:#9aa}
 <button id="fin">Settle &amp; pay out</button>
 <button class="alt" id="subs">Show submitted links</button>
 <button class="alt" id="cancel">Cancel event</button>
-<button class="alt" id="refund">Refund everyone (after deadline)</button></section>
+<button class="alt" id="refund">Refund sponsor (after deadline)</button></section>
 <pre id="log"></pre>
 
 <script src="https://cdn.jsdelivr.net/npm/near-api-js@2.1.4/dist/near-api-js.min.js"></script>
 <script>
 const $=id=>document.getElementById(id), log=m=>$('log').textContent=String(m);
-const cfg={networkId:'mainnet',nodeUrl:'https://rpc.mainnet.near.org',walletUrl:'https://app.mynearwallet.com',helperUrl:'https://helper.mainnet.near.org'};
-let wallet,acct;
+const cfg={networkId:'testnet',nodeUrl:'https://rpc.testnet.near.org',walletUrl:'https://testnet.mynearwallet.com',helperUrl:'https://helper.testnet.near.org'};
+let wallet,acct;\nconst positiveNumber=v=>Number.isFinite(Number(v))&&Number(v)>0;
 $('cid').value=localStorage.getItem('cid')||'';
 const GAS='100000000000000', ns=min=>String((Date.now()+min*60000)*1e6);
 const toY=v=>nearAPI.utils.format.parseNearAmount((v||'0').trim()||'0');
 (async()=>{
   const near=await nearAPI.connect({...cfg,keyStore:new nearAPI.keyStores.BrowserLocalStorageKeyStore()});
-  wallet=new nearAPI.WalletConnection(near,'showup');
+  wallet=new nearAPI.WalletConnection(near,'pactchain');
   if(wallet.isSignedIn()){acct=wallet.account();$('who').innerHTML='<small>Signed in as '+wallet.getAccountId()+'</small>'}
 })();
 $('login').onclick=()=>{localStorage.setItem('cid',$('cid').value.trim());wallet.requestSignIn({contractId:$('cid').value.trim()})};
@@ -74,18 +87,27 @@ const view=(m,args)=>(acct||wallet.account()).viewFunction({contractId:cid(),met
 const id=()=>parseInt($('eid').value,10);
 async function sha64(t){const h=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t)));return btoa(String.fromCharCode(...h))}
 $('create').onclick=async()=>{
-  const guest=$('mode').value==='guest', code=$('code').value;
-  if(guest&&!code)return log('Guest-pays events need a secret code');
-  await call('create_event',{title:$('title').value,min_deposit:guest?toY($('min').value):'0',
-    code_hash:code?await sha64(code):null,submissions_mode:!guest&&!code,
-    num_winners:$('nw').value?parseInt($('nw').value,10):null,
-    register_by:ns(+$('t1').value),submit_by:ns(+$('t2').value),finalize_by:ns(+$('t3').value)},toY($('seed').value))};
+  const title=$('title').value.trim();
+  const seed=$('seed').value.trim();
+  const registerMins=Number($('t1').value), submitMins=Number($('t2').value), finalizeMins=Number($('t3').value);
+  const winners=$('nw').value.trim();
+  if(!cid())return log('Enter the NEAR testnet contract account first.');
+  if(!title||title.length>100)return log('Enter an event title (maximum 100 characters).');
+  if(!Number.isFinite(Number(seed))||Number(seed)<=0)return log('Enter a sponsor reward pool greater than zero.');
+  if(![registerMins,submitMins,finalizeMins].every(v=>Number.isFinite(v)&&v>0)||!(registerMins<=submitMins&&submitMins<finalizeMins))return log('Set valid future deadlines: registration close ≤ submission close < settlement deadline.');
+  if(winners&&(!Number.isInteger(Number(winners))||Number(winners)<1||Number(winners)>100))return log('Winner count must be a whole number from 1 to 100.');
+  const code=$('code').value;
+  await call('create_event',{title,min_deposit:'0',
+    code_hash:code?await sha64(code):null,submissions_mode:!code,
+    num_winners:winners?parseInt(winners,10):null,
+    register_by:ns(registerMins),submit_by:ns(submitMins),finalize_by:ns(finalizeMins)},toY(seed))
+};
 $('load').onclick=async()=>{try{const e=await view('get_event',{id:id()});
   if(!e)return $('ev').textContent='No such event';
   const y=v=>nearAPI.utils.format.formatNearAmount(v,2)+' NEAR';
-  $('ev').textContent=`${e.title}\nMode: ${e.min_deposit==='0'?'host-funded':'guest-pays (min '+y(e.min_deposit)+')'}\nPot: ${y(e.pot)}\nWinners allowed: ${e.num_winners??'no limit'}\nGuests: ${e.guests.length}\nSolved: ${e.completed.length}\nSettled: ${e.done}
+  $('ev').textContent=`${e.title}\nFunding: sponsor-funded (no participant stakes)\nPot: ${y(e.pot)}\nWinners allowed: ${e.num_winners??'no limit'}\nGuests: ${e.guests.length}\nSolved: ${e.completed.length}\nSettled: ${e.done}
 Payouts: ${(e.payouts||[]).map(p=>p.recipient+': '+y(p.amount)+' ['+p.status+']').join('\n')||'none'}`}catch(x){$('ev').textContent=x.message||x}};
-$('reg').onclick=()=>call('register',{id:id()},toY($('stake').value));
+$('reg').onclick=()=>call('register',{id:id()});
 $('subcode').onclick=()=>call('submit_code',{id:id(),code:$('gcode').value});
 $('claim').onclick=()=>call('claim_payout',{id:id()});
 $('sublink').onclick=()=>call('submit',{id:id(),proof:$('link').value});

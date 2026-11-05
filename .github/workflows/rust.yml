@@ -2,7 +2,7 @@ name: Rust contract checks
 
 on:
   push:
-    branches: [main]
+    branches: [main, "pactchain/**"]
   pull_request:
     branches: [main]
 

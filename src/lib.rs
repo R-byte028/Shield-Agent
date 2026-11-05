@@ -2,12 +2,7 @@ use near_sdk::json_types::Base64VecU8;
 use near_sdk::store::IterableMap;
 use near_sdk::{env, near, require, AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseResult};
 
-uint::construct_uint! {
-    /// 256-bit int so stake * pot can't overflow u128
-    pub struct U256(4);
-}
-
-const MAX_GUESTS: usize = 100; // keeps gas bounded when paying out
+ const MAX_GUESTS: usize = 100; // keeps gas bounded when paying out
 
 #[near(serializers = [borsh, json])]
 #[derive(Clone)]
@@ -41,10 +36,9 @@ pub struct Payout {
 pub struct Event {
     pub host: AccountId,
     pub title: String,
-    /// 0 = host-funded (guests join free). >0 = guest-pays: each guest chooses
-    /// their own amount, at least this minimum.
+    /// Retained as a zero-valued compatibility field; participant deposits are disabled.
     pub min_deposit: NearToken,
-    pub pot: NearToken,            // host seed + all guest deposits
+    pub pot: NearToken,            // sponsor/host-funded prize pool only
     pub host_funded: NearToken,
     pub challenge: Challenge,
     /// How many winners the host wants (None = no limit). Code events: the first N
@@ -55,7 +49,8 @@ pub struct Event {
     pub submit_by: u64,            // codes/links accepted until here
     pub finalize_by: u64,          // host must settle before this; after it anyone can refund
     pub guests: Vec<AccountId>,
-    pub stakes: Vec<NearToken>,    // stakes[i] = amount guests[i] deposited
+    /// Retained for serialized-state compatibility; all entries are zero.
+    pub stakes: Vec<NearToken>,
     pub completed: Vec<AccountId>,
     pub submissions: Vec<(AccountId, String)>,
     /// Pull-based payouts. Failed transfers return to Pending through the callback.
@@ -77,8 +72,8 @@ impl Contract {
         Self { events: IterableMap::new(b"e"), next_id: 0 }
     }
 
-    /// Host creates an event. Any attached NEAR becomes the host-funded pot.
-    /// min_deposit > 0 makes it guest-pays (guests pick their own amount >= min).
+    /// Host creates a sponsor-funded event. Attached NEAR is the only prize funding.
+    /// Participant deposits are disabled; min_deposit must be zero.
     #[payable]
     pub fn create_event(
         &mut self,
@@ -100,11 +95,10 @@ impl Contract {
             env::block_timestamp() < register_by && register_by <= submit_by && submit_by < finalize_by,
             "bad timeline: now < register_by <= submit_by < finalize_by"
         );
-        let guest_pays = min_deposit.as_yoctonear() > 0;
-        // Guest-pays events must use the code challenge so winners aren't host-picked
-        if guest_pays {
-            require!(code_hash.is_some(), "guest-pays events need a code challenge");
-        }
+        require!(
+            min_deposit.as_yoctonear() == 0,
+            "participant deposits are disabled; sponsor-funded events only"
+        );
         if let Some(n) = num_winners {
             require!(n > 0 && (n as usize) <= MAX_GUESTS, "num_winners must be 1..=100");
         }
@@ -137,8 +131,7 @@ impl Contract {
         id
     }
 
-    /// Guest registers. Guest-pays: attach any amount >= min_deposit (your stake).
-    /// Host-funded: attach nothing.
+    /// Guests register for free. Only the host/sponsor funds the prize pool.
     #[payable]
     pub fn register(&mut self, id: u64) {
         let e = self.events.get_mut(&id).expect("no event");
@@ -149,14 +142,12 @@ impl Contract {
         require!(me != e.host, "host can't register in own event");
         require!(!e.guests.contains(&me), "already registered");
         require!(e.guests.len() < MAX_GUESTS, "event full");
-        if e.min_deposit.as_yoctonear() > 0 {
-            require!(amount >= e.min_deposit, "deposit below the minimum");
-        } else {
-            require!(amount.as_yoctonear() == 0, "this event is free to join");
-        }
-        e.pot = e.pot.saturating_add(amount);
+        require!(
+            amount.as_yoctonear() == 0,
+            "registration is free; participant deposits are disabled"
+        );
         e.guests.push(me);
-        e.stakes.push(amount);
+        e.stakes.push(NearToken::from_yoctonear(0));
     }
 
     /// Code / puzzle answer.
@@ -201,7 +192,7 @@ impl Contract {
         self.events.get(&id).expect("no event").submissions.clone()
     }
 
-    /// Host cancels before submissions close: everyone gets their own stake back.
+    /// Host cancels before submissions close; the sponsor-funded pool becomes refundable.
     pub fn cancel(&mut self, id: u64) {
         let e = self.events.get_mut(&id).expect("no event");
         require!(env::predecessor_account_id() == e.host, "host only");
@@ -218,12 +209,8 @@ impl Contract {
         Self::refund_all(e);
     }
 
-    /// Host settles, only inside the window (submit_by, finalize_by]
-    /// (or earlier if all first-come-first-served prizes are claimed).
-    /// Guest-pays: winners = code completers; the whole pot is shared in
-    /// proportion to each winner's own stake. Host-funded: even split among
-    /// winners (host-picked, or code completers / first N). No winners =
-    /// everyone is refunded their own stake.
+    /// Host settles inside the allowed window. The sponsor-funded prize pool is
+    /// split evenly among eligible winners. No winners means the sponsor is refunded.
     pub fn finalize(&mut self, id: u64, winners: Option<Vec<AccountId>>) {
         let e = self.events.get_mut(&id).expect("no event");
         require!(env::predecessor_account_id() == e.host, "host only");
@@ -234,19 +221,29 @@ impl Contract {
         let code_event = matches!(e.challenge, Challenge::Code { .. });
         require!(now > e.submit_by || all_claimed, "submissions still open");
         require!(now <= e.finalize_by, "deadline passed, use refund");
-        // Guest-pays, or code event with a winner limit: the contract decides (first N)
-        if e.min_deposit.as_yoctonear() > 0 || (code_event && e.num_winners.is_some()) {
+        // Code-challenge winners must always be determined by successful on-chain
+        // submissions, regardless of who funded the event or whether a cap is set.
+        if code_event {
             require!(winners.is_none(), "winners are set by the code challenge");
         }
         let winners = winners.unwrap_or_else(|| e.completed.clone());
+
+        // A host may choose winners for link-submission events, but only from
+        // accounts that actually submitted a proof link.
+        if matches!(e.challenge, Challenge::Submission) {
+            for winner in &winners {
+                require!(
+                    e.submissions.iter().any(|(guest, _)| guest == winner),
+                    "winner did not submit proof"
+                );
+            }
+        }
         if let Some(n) = e.num_winners {
             require!(winners.len() as u32 <= n, "more winners than the event allows");
         }
-        let mut stakes: Vec<u128> = vec![];
         for (i, w) in winners.iter().enumerate() {
-            let idx = e.guests.iter().position(|g| g == w).expect("winner not registered");
+            require!(e.guests.contains(w), "winner not registered");
             require!(!winners[..i].contains(w), "duplicate winner");
-            stakes.push(e.stakes[idx].as_yoctonear());
         }
         e.done = true;
         if winners.is_empty() {
@@ -254,7 +251,7 @@ impl Contract {
             return;
         }
         let total = e.pot.as_yoctonear();
-        let amounts = split_pot(total, &stakes);
+        let amounts = split_pot(total, &vec![0; winners.len()]);
         e.payouts.clear();
         for (recipient, amount) in winners.into_iter().zip(amounts) {
             if amount > 0 {
@@ -319,15 +316,8 @@ impl Contract {
 impl Contract {
     fn refund_all(e: &mut Event) {
         e.payouts.clear();
-        for (guest, stake) in e.guests.iter().zip(e.stakes.iter()) {
-            if stake.as_yoctonear() > 0 {
-                e.payouts.push(Payout {
-                    recipient: guest.clone(),
-                    amount: *stake,
-                    status: PayoutStatus::Pending,
-                });
-            }
-        }
+        // Participants never deposit funds; only return the sponsor's seed.
+        
         if e.host_funded.as_yoctonear() > 0 {
             e.payouts.push(Payout {
                 recipient: e.host.clone(),
@@ -338,41 +328,23 @@ impl Contract {
     }
 }
 
-/// Splits `total` among winners in proportion to their stakes (even
-/// split if all stakes are 0). The first winner gets the remainder, so nothing
-/// is left behind.
-pub fn split_pot(total: u128, stakes: &[u128]) -> Vec<u128> {
-    if stakes.is_empty() {
+/// Splits a sponsor-funded prize pool evenly. Any rounding remainder goes
+/// to the first winner so the full pool is allocated without dust.
+pub fn split_pot(total: u128, recipients: &[u128]) -> Vec<u128> {
+    if recipients.is_empty() {
         return vec![];
     }
-
-    // Sum in U256: up to 100 individually valid u128 stakes can overflow u128.
-    let sum = stakes
-        .iter()
-        .fold(U256::zero(), |acc, stake| acc + U256::from(*stake));
-    let count = U256::from(stakes.len() as u128);
-
-    let mut out: Vec<u128> = stakes
-        .iter()
-        .map(|stake| {
-            if sum.is_zero() {
-                (U256::from(total) / count).as_u128()
-            } else {
-                (U256::from(total) * U256::from(*stake) / sum).as_u128()
-            }
-        })
-        .collect();
-
-    // Assign rounding dust to the first winner so the payout is exact.
-    let paid_to_others: u128 = out.iter().skip(1).sum();
-    out[0] = total - paid_to_others;
+    let count = recipients.len() as u128;
+    let share = total / count;
+    let mut out = vec![share; recipients.len()];
+    out[0] += total % count;
     out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use near_sdk::test_utils::{accounts, get_created_receipts, VMContextBuilder};
+    use near_sdk::test_utils::{accounts, testing_env_with_promise_results, VMContextBuilder};
     use near_sdk::testing_env;
 
     const N: u128 = 1_000_000_000_000_000_000_000_000;
@@ -395,19 +367,17 @@ mod tests {
     }
 
     #[test]
-    fn split_is_proportional_and_exact() {
-        let out = split_pot(20 * N, &[N, 3 * N, 6 * N]);
+    fn sponsor_pool_is_split_evenly_and_exactly() {
+        let out = split_pot(20 * N, &[0, 0, 0]);
+        assert_eq!(out, vec![20 * N / 3 + 2, 20 * N / 3, 20 * N / 3]);
         assert_eq!(out.iter().sum::<u128>(), 20 * N);
-        assert_eq!(out[1], 6 * N);
-        assert_eq!(out[2], 12 * N);
-        assert_eq!(split_pot(10, &[0, 0, 0]).iter().sum::<u128>(), 10);
+        assert_eq!(split_pot(10, &[0, 0, 0]), vec![4, 3, 3]);
     }
 
     #[test]
-    fn split_handles_empty_and_extreme_stakes() {
+    fn split_handles_empty_and_maximum_pool() {
         assert!(split_pot(100, &[]).is_empty());
-
-        let out = split_pot(u128::MAX, &[u128::MAX, u128::MAX, u128::MAX]);
+        let out = split_pot(u128::MAX, &[0, 0, 0]);
         assert_eq!(out.iter().try_fold(0u128, |sum, amount| sum.checked_add(*amount)), Some(u128::MAX));
         assert_eq!(out[1], u128::MAX / 3);
         assert_eq!(out[2], u128::MAX / 3);
@@ -451,30 +421,104 @@ mod tests {
     }
 
     #[test]
-    fn guest_pays_settles_after_window() {
-        let mut c = setup(N, 0, None);
-        for (g, stake) in [(1, N), (2, 3 * N), (3, 6 * N)] { ctx(accounts(g), stake, 5); c.register(0); }
-        for g in 1..=2 { ctx(accounts(g), 0, 15); c.submit_code(0, "secret".into()); }
+    #[should_panic(expected = "winners are set by the code challenge")]
+    fn host_funded_code_event_without_cap_rejects_host_selected_winners() {
+        let mut c = setup(0, 10 * N, None);
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(0), 0, 25);
+        c.finalize(0, Some(vec![accounts(1)]));
+    }
+
+    #[test]
+    fn uncapped_code_event_pays_only_successful_code_submitters() {
+        let mut c = setup(0, 10 * N, None);
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit_code(0, "secret".into());
         ctx(accounts(0), 0, 25);
         c.finalize(0, None);
-        assert_eq!(c.get_event(0).unwrap().payouts.len(), 2);
+        let event = c.get_event(0).unwrap();
+        assert_eq!(event.payouts.len(), 1);
+        assert_eq!(event.payouts[0].recipient, accounts(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "winner did not submit proof")]
+    fn submission_event_rejects_winner_without_proof() {
+        let mut c = Contract::new();
+        ctx(accounts(0), 10 * N, 1);
+        c.create_event("links".into(), NearToken::from_yoctonear(0), None, true, None, 10, 20, 30);
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(0), 0, 25);
+        c.finalize(0, Some(vec![accounts(1)]));
+    }
+
+    #[test]
+    fn submission_event_accepts_registered_proof_submitter() {
+        let mut c = Contract::new();
+        ctx(accounts(0), 10 * N, 1);
+        c.create_event("links".into(), NearToken::from_yoctonear(0), None, true, None, 10, 20, 30);
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit(0, "https://example.com/proof".into());
+        ctx(accounts(0), 0, 25);
+        c.finalize(0, Some(vec![accounts(1)]));
+        let event = c.get_event(0).unwrap();
+        assert_eq!(event.payouts.len(), 1);
+        assert_eq!(event.payouts[0].recipient, accounts(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "participant deposits are disabled")]
+    fn event_creation_rejects_participant_stake_mode() {
+        let mut c = Contract::new();
+        ctx(accounts(0), 0, 1);
+        c.create_event("no stakes".into(), NearToken::from_yoctonear(N), Some(code_hash()), false, None, 10, 20, 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "registration is free")]
+    fn guest_cannot_attach_a_participant_deposit() {
+        let mut c = setup(0, 10 * N, None);
+        ctx(accounts(1), N, 5);
+        c.register(0);
+    }
+
+    #[test]
+    fn sponsor_funded_event_pays_equal_rewards() {
+        let mut c = setup(0, 9 * N, None);
+        for g in 1..=3 { ctx(accounts(g), 0, 5); c.register(0); }
+        for g in 1..=3 { ctx(accounts(g), 0, 6); c.submit_code(0, "secret".into()); }
+        ctx(accounts(0), 0, 25);
+        c.finalize(0, None);
+        let payouts = c.get_event(0).unwrap().payouts;
+        assert_eq!(payouts.len(), 3);
+        assert_eq!(payouts.iter().map(|p| p.amount.as_yoctonear()).sum::<u128>(), 9 * N);
+        assert!(payouts.iter().all(|p| p.amount.as_yoctonear() == 3 * N));
     }
 
     #[test]
     #[should_panic(expected = "submissions still open")]
     fn host_cannot_settle_early() {
-        let mut c = setup(N, 0, None);
-        ctx(accounts(1), N, 5); c.register(0);
+        let mut c = setup(0, 0, None);
+        ctx(accounts(1), 0, 5); c.register(0);
         ctx(accounts(0), 0, 15); c.finalize(0, None);
     }
 
     #[test]
     fn anyone_can_refund_after_deadline() {
-        let mut c = setup(N, 5 * N, None);
-        for g in 1..=2 { ctx(accounts(g), N, 5); c.register(0); }
+        let mut c = setup(0, 5 * N, None);
+        for g in 1..=2 { ctx(accounts(g), 0, 5); c.register(0); }
         ctx(accounts(4), 0, 31);
         c.refund(0);
-        assert_eq!(c.get_event(0).unwrap().payouts.len(), 3); // 2 guests + host seed
+        let payouts = c.get_event(0).unwrap().payouts;
+        assert_eq!(payouts.len(), 1); // sponsor seed only
+        assert_eq!(payouts[0].recipient, accounts(0));
+        assert_eq!(payouts[0].amount.as_yoctonear(), 5 * N);
     }
 
     #[test]
@@ -489,7 +533,186 @@ mod tests {
     #[test]
     #[should_panic(expected = "host can't register")]
     fn host_cannot_join_own_event() {
-        let mut c = setup(N, 0, None);
-        ctx(accounts(0), N, 5); c.register(0);
+        let mut c = setup(0, 0, None);
+        ctx(accounts(0), 0, 5); c.register(0);
     }
+
+
+    #[test]
+    #[should_panic(expected = "no pending payout for caller")]
+    fn non_recipient_cannot_claim_another_guests_payout() {
+        let mut c = setup(0, 10 * N, Some(1));
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit_code(0, "secret".into());
+        ctx(accounts(0), 0, 7);
+        c.finalize(0, None);
+
+        ctx(accounts(2), 0, 8);
+        let _claim = c.claim_payout(0);
+    }
+
+    #[test]
+    #[should_panic(expected = "already settled")]
+    fn refund_cannot_be_triggered_twice() {
+        let mut c = setup(0, 5 * N, None);
+        ctx(accounts(4), 0, 31);
+        c.refund(0);
+        ctx(accounts(3), 0, 32);
+        c.refund(0);
+    }
+
+    #[test]
+    fn cancellation_creates_only_one_sponsor_refund() {
+        let mut c = setup(0, 5 * N, None);
+        ctx(accounts(0), 0, 5);
+        c.cancel(0);
+        let event = c.get_event(0).unwrap();
+        assert!(event.done);
+        assert_eq!(event.payouts.len(), 1);
+        assert_eq!(event.payouts[0].recipient, accounts(0));
+        assert_eq!(event.payouts[0].amount.as_yoctonear(), 5 * N);
+    }
+
+    fn settled_event_with_in_flight_payout() -> Contract {
+        let mut c = setup(0, 10 * N, Some(1));
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit_code(0, "secret".into());
+        ctx(accounts(0), 0, 7);
+        c.finalize(0, None);
+        c.events.get_mut(&0).unwrap().payouts[0].status = PayoutStatus::InFlight;
+        c
+    }
+
+    #[test]
+    fn successful_payout_callback_marks_payout_paid() {
+        let mut c = settled_event_with_in_flight_payout();
+        let context = VMContextBuilder::new()
+            .current_account_id(accounts(5))
+            .predecessor_account_id(accounts(5))
+            .build();
+        testing_env_with_promise_results(context, PromiseResult::Successful(vec![]));
+        assert!(c.on_payout_complete(0, 0));
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::Paid);
+    }
+
+    #[test]
+    fn failed_payout_callback_restores_pending_for_retry() {
+        let mut c = settled_event_with_in_flight_payout();
+        let context = VMContextBuilder::new()
+            .current_account_id(accounts(5))
+            .predecessor_account_id(accounts(5))
+            .build();
+        testing_env_with_promise_results(context, PromiseResult::Failed);
+        assert!(!c.on_payout_complete(0, 0));
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::Pending);
+    }
+
+    #[test]
+    #[should_panic(expected = "no pending payout for caller")]
+    fn duplicate_claim_is_rejected_while_first_claim_is_in_flight() {
+        let mut c = setup(0, 10 * N, Some(1));
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit_code(0, "secret".into());
+        ctx(accounts(0), 0, 7);
+        c.finalize(0, None);
+
+        ctx(accounts(1), 0, 8);
+        let _first_claim = c.claim_payout(0);
+        let _duplicate_claim = c.claim_payout(0);
+    }
+
+
+    #[test]
+    fn full_submission_event_lifecycle_claims_and_marks_paid() {
+        let mut c = Contract::new();
+        ctx(accounts(0), 10 * N, 1);
+        c.create_event("proof lifecycle".into(), NearToken::from_yoctonear(0), None, true, Some(1), 10, 20, 30);
+
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit(0, "https://example.com/proof".into());
+
+        ctx(accounts(0), 0, 21);
+        c.finalize(0, Some(vec![accounts(1)]));
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::Pending);
+
+        ctx(accounts(1), 0, 22);
+        let _promise = c.claim_payout(0);
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::InFlight);
+
+        let callback_context = VMContextBuilder::new()
+            .current_account_id(accounts(5))
+            .predecessor_account_id(accounts(5))
+            .build();
+        testing_env_with_promise_results(callback_context, PromiseResult::Successful(vec![]));
+        assert!(c.on_payout_complete(0, 0));
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::Paid);
+    }
+
+    #[test]
+    fn failed_claim_can_be_retried_through_successful_completion() {
+        let mut c = setup(0, 10 * N, Some(1));
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit_code(0, "secret".into());
+        ctx(accounts(0), 0, 21);
+        c.finalize(0, None);
+
+        ctx(accounts(1), 0, 22);
+        let _first_promise = c.claim_payout(0);
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::InFlight);
+
+        let failed_context = VMContextBuilder::new()
+            .current_account_id(accounts(5))
+            .predecessor_account_id(accounts(5))
+            .build();
+        testing_env_with_promise_results(failed_context, PromiseResult::Failed);
+        assert!(!c.on_payout_complete(0, 0));
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::Pending);
+
+        ctx(accounts(1), 0, 23);
+        let _retry_promise = c.claim_payout(0);
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::InFlight);
+
+        let success_context = VMContextBuilder::new()
+            .current_account_id(accounts(5))
+            .predecessor_account_id(accounts(5))
+            .build();
+        testing_env_with_promise_results(success_context, PromiseResult::Successful(vec![]));
+        assert!(c.on_payout_complete(0, 0));
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::Paid);
+    }
+
+    #[test]
+    fn deadline_refund_lifecycle_returns_sponsor_funds_and_marks_paid() {
+        let mut c = setup(0, 5 * N, None);
+        ctx(accounts(4), 0, 31);
+        c.refund(0);
+        let event = c.get_event(0).unwrap();
+        assert!(event.done);
+        assert_eq!(event.payouts.len(), 1);
+        assert_eq!(event.payouts[0].recipient, accounts(0));
+        assert_eq!(event.payouts[0].status, PayoutStatus::Pending);
+
+        ctx(accounts(0), 0, 32);
+        let _refund_promise = c.claim_payout(0);
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::InFlight);
+
+        let callback_context = VMContextBuilder::new()
+            .current_account_id(accounts(5))
+            .predecessor_account_id(accounts(5))
+            .build();
+        testing_env_with_promise_results(callback_context, PromiseResult::Successful(vec![]));
+        assert!(c.on_payout_complete(0, 0));
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::Paid);
+    }
+
 }
