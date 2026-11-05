@@ -17,7 +17,7 @@ This is an initial source review, not a formal security audit. The prototype is 
 - Payouts remain pull-based: only the named recipient can claim a Pending payout; the status changes to InFlight before the transfer is initiated; the private callback marks success as Paid or restores failure to Pending.
 
 ## Remaining verification
-- Add explicit callback tests for successful transfer => Paid and failed transfer => Pending.
+- Added callback unit tests: successful promise result => Paid; failed promise result => Pending (retryable).
 - Added regression coverage for non-recipient claims, duplicate claims while InFlight, repeat refunds, and sponsor-only cancellation refunds.
 - Continue verifying settlement and refund transitions against duplicate sponsor payouts.
 - Run all CI checks and perform end-to-end testnet validation of event creation, registration, submissions, settlement, claims, cancellation, and deadline refunds.
