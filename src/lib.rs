@@ -536,4 +536,21 @@ mod tests {
         let mut c = setup(0, 0, None);
         ctx(accounts(0), 0, 5); c.register(0);
     }
+
+
+    #[test]
+    #[should_panic(expected = "no pending payout for caller")]
+    fn duplicate_claim_is_rejected_while_first_claim_is_in_flight() {
+        let mut c = setup(0, 10 * N, Some(1));
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit_code(0, "secret".into());
+        ctx(accounts(0), 0, 7);
+        c.finalize(0, None);
+
+        ctx(accounts(1), 0, 8);
+        let _first_claim = c.claim_payout(0);
+        let _duplicate_claim = c.claim_payout(0);
+    }
 }
