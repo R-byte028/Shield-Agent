@@ -626,4 +626,93 @@ mod tests {
         let _first_claim = c.claim_payout(0);
         let _duplicate_claim = c.claim_payout(0);
     }
+
+
+    #[test]
+    fn full_submission_event_lifecycle_claims_and_marks_paid() {
+        let mut c = Contract::new();
+        ctx(accounts(0), 10 * N, 1);
+        c.create_event("proof lifecycle".into(), NearToken::from_yoctonear(0), None, true, Some(1), 10, 20, 30);
+
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit(0, "https://example.com/proof".into());
+
+        ctx(accounts(0), 0, 21);
+        c.finalize(0, Some(vec![accounts(1)]));
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::Pending);
+
+        ctx(accounts(1), 0, 22);
+        let _promise = c.claim_payout(0);
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::InFlight);
+
+        let callback_context = VMContextBuilder::new()
+            .current_account_id(accounts(5))
+            .predecessor_account_id(accounts(5))
+            .build();
+        testing_env_with_promise_results(callback_context, PromiseResult::Successful(vec![]));
+        assert!(c.on_payout_complete(0, 0));
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::Paid);
+    }
+
+    #[test]
+    fn failed_claim_can_be_retried_through_successful_completion() {
+        let mut c = setup(0, 10 * N, Some(1));
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit_code(0, "secret".into());
+        ctx(accounts(0), 0, 21);
+        c.finalize(0, None);
+
+        ctx(accounts(1), 0, 22);
+        let _first_promise = c.claim_payout(0);
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::InFlight);
+
+        let failed_context = VMContextBuilder::new()
+            .current_account_id(accounts(5))
+            .predecessor_account_id(accounts(5))
+            .build();
+        testing_env_with_promise_results(failed_context, PromiseResult::Failed);
+        assert!(!c.on_payout_complete(0, 0));
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::Pending);
+
+        ctx(accounts(1), 0, 23);
+        let _retry_promise = c.claim_payout(0);
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::InFlight);
+
+        let success_context = VMContextBuilder::new()
+            .current_account_id(accounts(5))
+            .predecessor_account_id(accounts(5))
+            .build();
+        testing_env_with_promise_results(success_context, PromiseResult::Successful(vec![]));
+        assert!(c.on_payout_complete(0, 0));
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::Paid);
+    }
+
+    #[test]
+    fn deadline_refund_lifecycle_returns_sponsor_funds_and_marks_paid() {
+        let mut c = setup(0, 5 * N, None);
+        ctx(accounts(4), 0, 31);
+        c.refund(0);
+        let event = c.get_event(0).unwrap();
+        assert!(event.done);
+        assert_eq!(event.payouts.len(), 1);
+        assert_eq!(event.payouts[0].recipient, accounts(0));
+        assert_eq!(event.payouts[0].status, PayoutStatus::Pending);
+
+        ctx(accounts(0), 0, 32);
+        let _refund_promise = c.claim_payout(0);
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::InFlight);
+
+        let callback_context = VMContextBuilder::new()
+            .current_account_id(accounts(5))
+            .predecessor_account_id(accounts(5))
+            .build();
+        testing_env_with_promise_results(callback_context, PromiseResult::Successful(vec![]));
+        assert!(c.on_payout_complete(0, 0));
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::Paid);
+    }
+
 }
