@@ -344,7 +344,7 @@ pub fn split_pot(total: u128, recipients: &[u128]) -> Vec<u128> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use near_sdk::test_utils::{accounts, get_created_receipts, testing_env_with_promise_results, VMContextBuilder};
+    use near_sdk::test_utils::{accounts, testing_env_with_promise_results, VMContextBuilder};
     use near_sdk::testing_env;
 
     const N: u128 = 1_000_000_000_000_000_000_000_000;
@@ -591,8 +591,8 @@ mod tests {
     fn successful_payout_callback_marks_payout_paid() {
         let mut c = settled_event_with_in_flight_payout();
         let context = VMContextBuilder::new()
-            .current_account_id(accounts(9))
-            .predecessor_account_id(accounts(9))
+            .current_account_id(accounts(5))
+            .predecessor_account_id(accounts(5))
             .build();
         testing_env_with_promise_results(context, PromiseResult::Successful(vec![]));
         assert!(c.on_payout_complete(0, 0));
