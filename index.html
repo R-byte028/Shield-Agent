@@ -76,7 +76,7 @@ const GAS='100000000000000', ns=min=>String((Date.now()+min*60000)*1e6);
 const toY=v=>nearAPI.utils.format.parseNearAmount((v||'0').trim()||'0');
 (async()=>{
   const near=await nearAPI.connect({...cfg,keyStore:new nearAPI.keyStores.BrowserLocalStorageKeyStore()});
-  wallet=new nearAPI.WalletConnection(near,'showup');
+  wallet=new nearAPI.WalletConnection(near,'pactchain');
   if(wallet.isSignedIn()){acct=wallet.account();$('who').innerHTML='<small>Signed in as '+wallet.getAccountId()+'</small>'}
 })();
 $('login').onclick=()=>{localStorage.setItem('cid',$('cid').value.trim());wallet.requestSignIn({contractId:$('cid').value.trim()})};
