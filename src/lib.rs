@@ -540,6 +540,43 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "no pending payout for caller")]
+    fn non_recipient_cannot_claim_another_guests_payout() {
+        let mut c = setup(0, 10 * N, Some(1));
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit_code(0, "secret".into());
+        ctx(accounts(0), 0, 7);
+        c.finalize(0, None);
+
+        ctx(accounts(2), 0, 8);
+        let _claim = c.claim_payout(0);
+    }
+
+    #[test]
+    #[should_panic(expected = "already settled")]
+    fn refund_cannot_be_triggered_twice() {
+        let mut c = setup(0, 5 * N, None);
+        ctx(accounts(4), 0, 31);
+        c.refund(0);
+        ctx(accounts(3), 0, 32);
+        c.refund(0);
+    }
+
+    #[test]
+    fn cancellation_creates_only_one_sponsor_refund() {
+        let mut c = setup(0, 5 * N, None);
+        ctx(accounts(0), 0, 5);
+        c.cancel(0);
+        let event = c.get_event(0).unwrap();
+        assert!(event.done);
+        assert_eq!(event.payouts.len(), 1);
+        assert_eq!(event.payouts[0].recipient, accounts(0));
+        assert_eq!(event.payouts[0].amount.as_yoctonear(), 5 * N);
+    }
+
+    #[test]
+    #[should_panic(expected = "no pending payout for caller")]
     fn duplicate_claim_is_rejected_while_first_claim_is_in_flight() {
         let mut c = setup(0, 10 * N, Some(1));
         ctx(accounts(1), 0, 5);
