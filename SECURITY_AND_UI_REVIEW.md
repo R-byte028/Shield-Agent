@@ -18,8 +18,8 @@ This is an initial source review, not a formal security audit. The prototype is 
 
 ## Remaining verification
 - Add explicit callback tests for successful transfer => Paid and failed transfer => Pending.
-- Add explicit tests for non-recipient claims and duplicate claims while InFlight.
-- Verify refund and settlement transitions cannot create duplicate sponsor payouts.
+- Added regression coverage for non-recipient claims, duplicate claims while InFlight, repeat refunds, and sponsor-only cancellation refunds.
+- Continue verifying settlement and refund transitions against duplicate sponsor payouts.
 - Run all CI checks and perform end-to-end testnet validation of event creation, registration, submissions, settlement, claims, cancellation, and deadline refunds.
 - Obtain independent security review before considering any deployment beyond testnet.
 
