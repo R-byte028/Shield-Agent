@@ -603,8 +603,8 @@ mod tests {
     fn failed_payout_callback_restores_pending_for_retry() {
         let mut c = settled_event_with_in_flight_payout();
         let context = VMContextBuilder::new()
-            .current_account_id(accounts(9))
-            .predecessor_account_id(accounts(9))
+            .current_account_id(accounts(5))
+            .predecessor_account_id(accounts(5))
             .build();
         testing_env_with_promise_results(context, PromiseResult::Failed);
         assert!(!c.on_payout_complete(0, 0));
