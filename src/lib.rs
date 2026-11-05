@@ -192,7 +192,7 @@ impl Contract {
         self.events.get(&id).expect("no event").submissions.clone()
     }
 
-    /// Host cancels before submissions close: everyone gets their own stake back.
+    /// Host cancels before submissions close; the sponsor-funded pool becomes refundable.
     pub fn cancel(&mut self, id: u64) {
         let e = self.events.get_mut(&id).expect("no event");
         require!(env::predecessor_account_id() == e.host, "host only");
