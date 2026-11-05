@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Show-Up Pot | On-chain Event Escrow</title>
+<title>PactChain | On-chain Event Escrow</title>
 <style>
 :root{color-scheme:dark;--bg:#090d14;--panel:#111925;--panel2:#151f2d;--line:#263447;--text:#edf4ff;--muted:#91a2b8;--mint:#69f0c1;--blue:#7aa8ff;--danger:#ff8f9a}
 *{box-sizing:border-box}
@@ -27,8 +27,8 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#080e16;border:1px so
 @media(min-width:760px){body{padding-top:48px}body>section{padding:24px 26px}section input,section select{width:calc(50% - 10px);margin:5px 4px 5px 0}section button{width:auto;min-width:170px;padding-left:20px;padding-right:20px;margin:8px 8px 0 0}#who{display:inline-block;min-width:220px;margin-left:8px}}
 @media(max-width:520px){body{padding:22px 14px 40px}body>section{padding:17px;border-radius:14px}h1{font-size:32px}section button{min-height:48px}}
 </style></head><body>
-<h1>Show-Up Pot</h1>
-<small>On-chain event escrow · NEAR TESTNET ONLY<br>Prototype interface. Use testnet tokens only — never connect a mainnet contract or send real funds.</small>
+<h1>PactChain</h1>
+<small>Sponsor-funded event escrow · NEAR TESTNET ONLY<br>Create transparent community challenges, verify submissions on-chain, and distribute sponsor-funded rewards. Prototype only — use testnet tokens, never real funds.</small>
 
 <section><h2>1. Connect</h2>
 <input id="cid" placeholder="Contract account (e.g. showup.yourname.near)">
@@ -36,14 +36,14 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#080e16;border:1px so
 
 <section><h2>2. Create event (host)</h2>
 <input id="title" placeholder="Event title">
-<input id="seed" placeholder="Sponsor-funded prize pool in NEAR">
+<input id="seed" placeholder="Sponsor-funded reward pool in testnet NEAR">
 <input id="code" placeholder="Secret code / puzzle answer (optional)">
 <input id="nw" placeholder="Number of winners (blank = no limit)">
 <small>Minutes from now until:</small>
 <input id="t1" placeholder="Registration closes (min)" value="30">
 <input id="t2" placeholder="Submissions close (min)" value="60">
 <input id="t3" placeholder="Settle-by deadline (min)" value="120">
-<button id="create">Create event</button></section>
+<button id="create">Create sponsored event</button></section>
 
 <section><h2>3. Open event</h2>
 <input id="eid" placeholder="Event ID" value="0">
@@ -63,14 +63,14 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#080e16;border:1px so
 <button id="fin">Settle &amp; pay out</button>
 <button class="alt" id="subs">Show submitted links</button>
 <button class="alt" id="cancel">Cancel event</button>
-<button class="alt" id="refund">Refund everyone (after deadline)</button></section>
+<button class="alt" id="refund">Refund sponsor (after deadline)</button></section>
 <pre id="log"></pre>
 
 <script src="https://cdn.jsdelivr.net/npm/near-api-js@2.1.4/dist/near-api-js.min.js"></script>
 <script>
 const $=id=>document.getElementById(id), log=m=>$('log').textContent=String(m);
 const cfg={networkId:'testnet',nodeUrl:'https://rpc.testnet.near.org',walletUrl:'https://testnet.mynearwallet.com',helperUrl:'https://helper.testnet.near.org'};
-let wallet,acct;
+let wallet,acct;\nconst positiveNumber=v=>Number.isFinite(Number(v))&&Number(v)>0;
 $('cid').value=localStorage.getItem('cid')||'';
 const GAS='100000000000000', ns=min=>String((Date.now()+min*60000)*1e6);
 const toY=v=>nearAPI.utils.format.parseNearAmount((v||'0').trim()||'0');
@@ -90,8 +90,8 @@ $('create').onclick=async()=>{
   const code=$('code').value;
   await call('create_event',{title:$('title').value,min_deposit:'0',
     code_hash:code?await sha64(code):null,submissions_mode:!code,
-    num_winners:$('nw').value?parseInt($('nw').value,10):null,
-    register_by:ns(+$('t1').value),submit_by:ns(+$('t2').value),finalize_by:ns(+$('t3').value)},toY($('seed').value))};
+    num_winners:winners?parseInt(winners,10):null,
+    register_by:ns(+$('t1').value),submit_by:ns(+$('t2').value),finalize_by:ns(+$('t3').value)},toY(seed))};
 $('load').onclick=async()=>{try{const e=await view('get_event',{id:id()});
   if(!e)return $('ev').textContent='No such event';
   const y=v=>nearAPI.utils.format.formatNearAmount(v,2)+' NEAR';
