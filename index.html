@@ -87,11 +87,21 @@ const view=(m,args)=>(acct||wallet.account()).viewFunction({contractId:cid(),met
 const id=()=>parseInt($('eid').value,10);
 async function sha64(t){const h=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t)));return btoa(String.fromCharCode(...h))}
 $('create').onclick=async()=>{
+  const title=$('title').value.trim();
+  const seed=$('seed').value.trim();
+  const registerMins=Number($('t1').value), submitMins=Number($('t2').value), finalizeMins=Number($('t3').value);
+  const winners=$('nw').value.trim();
+  if(!cid())return log('Enter the NEAR testnet contract account first.');
+  if(!title||title.length>100)return log('Enter an event title (maximum 100 characters).');
+  if(!Number.isFinite(Number(seed))||Number(seed)<=0)return log('Enter a sponsor reward pool greater than zero.');
+  if(![registerMins,submitMins,finalizeMins].every(v=>Number.isFinite(v)&&v>0)||!(registerMins<=submitMins&&submitMins<finalizeMins))return log('Set valid future deadlines: registration close ≤ submission close < settlement deadline.');
+  if(winners&&(!Number.isInteger(Number(winners))||Number(winners)<1||Number(winners)>100))return log('Winner count must be a whole number from 1 to 100.');
   const code=$('code').value;
-  await call('create_event',{title:$('title').value,min_deposit:'0',
+  await call('create_event',{title,min_deposit:'0',
     code_hash:code?await sha64(code):null,submissions_mode:!code,
     num_winners:winners?parseInt(winners,10):null,
-    register_by:ns(+$('t1').value),submit_by:ns(+$('t2').value),finalize_by:ns(+$('t3').value)},toY(seed))};
+    register_by:ns(registerMins),submit_by:ns(submitMins),finalize_by:ns(finalizeMins)},toY(seed))
+};
 $('load').onclick=async()=>{try{const e=await view('get_event',{id:id()});
   if(!e)return $('ev').textContent='No such event';
   const y=v=>nearAPI.utils.format.formatNearAmount(v,2)+' NEAR';
