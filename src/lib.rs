@@ -344,7 +344,7 @@ pub fn split_pot(total: u128, recipients: &[u128]) -> Vec<u128> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use near_sdk::test_utils::{accounts, get_created_receipts, VMContextBuilder};
+    use near_sdk::test_utils::{accounts, get_created_receipts, testing_env_with_promise_results, VMContextBuilder};
     use near_sdk::testing_env;
 
     const N: u128 = 1_000_000_000_000_000_000_000_000;
@@ -573,6 +573,42 @@ mod tests {
         assert_eq!(event.payouts.len(), 1);
         assert_eq!(event.payouts[0].recipient, accounts(0));
         assert_eq!(event.payouts[0].amount.as_yoctonear(), 5 * N);
+    }
+
+    fn settled_event_with_in_flight_payout() -> Contract {
+        let mut c = setup(0, 10 * N, Some(1));
+        ctx(accounts(1), 0, 5);
+        c.register(0);
+        ctx(accounts(1), 0, 6);
+        c.submit_code(0, "secret".into());
+        ctx(accounts(0), 0, 7);
+        c.finalize(0, None);
+        c.events.get_mut(&0).unwrap().payouts[0].status = PayoutStatus::InFlight;
+        c
+    }
+
+    #[test]
+    fn successful_payout_callback_marks_payout_paid() {
+        let mut c = settled_event_with_in_flight_payout();
+        let context = VMContextBuilder::new()
+            .current_account_id(accounts(9))
+            .predecessor_account_id(accounts(9))
+            .build();
+        testing_env_with_promise_results(context, PromiseResult::Successful(vec![]));
+        assert!(c.on_payout_complete(0, 0));
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::Paid);
+    }
+
+    #[test]
+    fn failed_payout_callback_restores_pending_for_retry() {
+        let mut c = settled_event_with_in_flight_payout();
+        let context = VMContextBuilder::new()
+            .current_account_id(accounts(9))
+            .predecessor_account_id(accounts(9))
+            .build();
+        testing_env_with_promise_results(context, PromiseResult::Failed);
+        assert!(!c.on_payout_complete(0, 0));
+        assert_eq!(c.get_event(0).unwrap().payouts[0].status, PayoutStatus::Pending);
     }
 
     #[test]
